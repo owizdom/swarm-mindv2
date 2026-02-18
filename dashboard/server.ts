@@ -74,6 +74,8 @@ export function startDashboard(
         latestThought: a.state.thoughts.length > 0
           ? a.state.thoughts[a.state.thoughts.length - 1].conclusion
           : null,
+        // Conway credit economy
+        credits: a.state.credits || { balance: 0, earned: 0, spent: 0, tier: "normal", distressEmitted: false },
       }))
     );
   });
@@ -276,6 +278,21 @@ export function startDashboard(
     } catch {
       res.json({ enabled: eigenDAEnabled(), proxyUrl: process.env.EIGENDA_PROXY_URL || null, pheromones: { total: 0, attested: 0, latest: [] }, collectiveMemories: { total: 0, attested: 0, items: [] } });
     }
+  });
+
+  // ── Conway: Credit & Survival Status ──
+
+  app.get("/api/credits", (_req, res) => {
+    res.json(
+      agents.map((a) => ({
+        agentId: a.state.id,
+        agentName: a.state.name,
+        specialization: a.state.specialization,
+        credits: a.state.credits || { balance: 0, earned: 0, spent: 0, tier: "normal", distressEmitted: false },
+        tokensUsed: a.state.tokensUsed,
+        tokenBudget: a.state.tokenBudget,
+      }))
+    );
   });
 
   // Inject a human pheromone into the swarm channel

@@ -225,6 +225,18 @@
     .latest-thought-box { background:var(--accent-soft); border-radius:var(--radius-sm); padding:8px; font-size:11px; color:#4338ca; line-height:1.4; border:1px solid #c7d2fe; }
     .synced-tag { display:inline-flex; align-items:center; gap:4px; font-size:10px; padding:2px 7px; border-radius:10px; background:var(--green-soft); color:var(--green); font-weight:600; }
 
+    /* ── Credit tiers ── */
+    .tier-badge { display:inline-flex; align-items:center; gap:3px; font-size:10px; padding:2px 7px; border-radius:10px; font-weight:600; }
+    .tier-normal      { background:var(--green-soft); color:var(--green); }
+    .tier-low_compute { background:var(--amber-soft); color:var(--amber); }
+    .tier-critical    { background:#fee2e2; color:#dc2626; }
+    .tier-dead        { background:#f3f4f6; color:#9ca3af; }
+    .credit-bar-wrap { margin-bottom:8px; }
+    .credit-bar-row { display:flex; justify-content:space-between; align-items:center; font-size:10.5px; color:var(--text-3); margin-bottom:3px; }
+    .credit-bar-track { height:3px; background:var(--border); border-radius:2px; overflow:hidden; }
+    .credit-bar-fill { height:100%; border-radius:2px; transition:width .5s; }
+    .selfmod-tag { font-size:10px; color:var(--text-3); display:flex; align-items:center; gap:3px; margin-top:3px; }
+
     /* ── Pheromones tab ── */
     .pheromone-row { display:flex; align-items:flex-start; gap:10px; padding:10px; border-radius:var(--radius-sm); border:1px solid var(--border); margin-bottom:6px; background:var(--surface); }
     .pheromone-type-dot { width:8px; height:8px; border-radius:50%; margin-top:4px; flex-shrink:0; }
@@ -332,6 +344,7 @@
       <div class="pill green">Synced <span class="val" id="h-synced">0/0</span></div>
       <div class="pill amber">Tokens <span class="val" id="h-tokens">0</span></div>
       <div class="pill">Density <span class="val" id="h-density">0.000</span></div>
+      <div class="pill" id="h-credits-pill">Credits <span class="val" id="h-credits">—</span></div>
       <div class="transition-badge" id="h-transition">⚡ Phase Transition</div>
     </div>
     <div class="inject-wrap">
@@ -351,6 +364,7 @@
       <div class="tab-section-label" style="margin-top:8px">Analysis</div>
       <button class="tab-btn" onclick="switchTab('report')"><span class="tab-icon">◷</span> Report</button>
       <button class="tab-btn" onclick="switchTab('collective')"><span class="tab-icon">◈</span> Collective</button>
+      <button class="tab-btn" onclick="switchTab('credits')"><span class="tab-icon">◉</span> Credits</button>
     </div>
 
     <!-- Content -->
@@ -416,6 +430,46 @@
         </div>
       </div>
 
+      <!-- Credits tab -->
+      <div class="tab-panel" id="panel-credits">
+        <div style="flex:1;overflow-y:auto;padding:20px;">
+          <div style="max-width:860px;margin:0 auto;">
+            <div style="margin-bottom:16px;">
+              <div style="font-size:15px;font-weight:700;margin-bottom:4px">Swarm Mind Credit Economy</div>
+              <div style="font-size:12px;color:var(--text-3)">Agents earn credits for discoveries and spend them on LLM compute. Tier gates model access.</div>
+            </div>
+            <div id="credits-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;margin-bottom:24px"></div>
+            <div style="font-size:11px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px">Tier Reference</div>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;font-size:12px;">
+              <div style="background:var(--green-soft);border:1px solid #a7f3d0;border-radius:var(--radius-sm);padding:10px 12px;">
+                <div style="font-weight:700;color:var(--green);margin-bottom:3px">Normal ≥50cr</div>
+                <div style="color:#065f46;font-size:11px">Full model, all capabilities</div>
+              </div>
+              <div style="background:var(--amber-soft);border:1px solid #fde68a;border-radius:var(--radius-sm);padding:10px 12px;">
+                <div style="font-weight:700;color:var(--amber);margin-bottom:3px">Low Compute 10–49cr</div>
+                <div style="color:#92400e;font-size:11px">Haiku model, lighter compute</div>
+              </div>
+              <div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:var(--radius-sm);padding:10px 12px;">
+                <div style="font-weight:700;color:#dc2626;margin-bottom:3px">Critical 1–9cr</div>
+                <div style="color:#991b1b;font-size:11px">Passive scan only, no LLM</div>
+              </div>
+              <div style="background:#f3f4f6;border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;">
+                <div style="font-weight:700;color:#6b7280;margin-bottom:3px">Dead &lt;1cr</div>
+                <div style="color:#9ca3af;font-size:11px">Dormant, emits distress</div>
+              </div>
+            </div>
+            <div style="margin-top:24px;font-size:11px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px">Earn Rates</div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px;font-size:12px">
+              <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;display:flex;justify-content:space-between"><span>High confidence finding</span><span style="font-weight:700;color:var(--green)">+5cr</span></div>
+              <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;display:flex;justify-content:space-between"><span>Medium confidence finding</span><span style="font-weight:700;color:var(--green)">+2cr</span></div>
+              <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;display:flex;justify-content:space-between"><span>Collective contribution</span><span style="font-weight:700;color:var(--green)">+10cr</span></div>
+              <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;display:flex;justify-content:space-between"><span>Self-modification</span><span style="font-weight:700;color:var(--green)">+3cr</span></div>
+              <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;display:flex;justify-content:space-between"><span>LLM token burn</span><span style="font-weight:700;color:#dc2626">-1cr / 1k tokens</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Collective tab -->
       <div class="tab-panel" id="panel-collective">
         <div style="flex:1;overflow-y:auto;padding:20px;">
@@ -446,12 +500,27 @@ const BUBBLE_DURATION = 5000; // ms
 
 // ── Tab switching ──
 function switchTab(name) {
-  const tabNames = ['live','agents','pheromones','report','collective'];
+  const tabNames = ['live','agents','pheromones','report','collective','credits'];
   document.querySelectorAll('.tab-btn').forEach((b, i) => b.classList.toggle('active', tabNames[i] === name));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
   document.getElementById('panel-' + name).classList.add('active');
   if (name === 'live') resize();
   if (name === 'report') fetchReport();
+}
+
+// ── Credit helpers ──
+function tierLabel(tier) {
+  if (tier === 'normal') return '<span class="tier-badge tier-normal">Normal</span>';
+  if (tier === 'low_compute') return '<span class="tier-badge tier-low_compute">Low Compute</span>';
+  if (tier === 'critical') return '<span class="tier-badge tier-critical">Critical</span>';
+  if (tier === 'dead') return '<span class="tier-badge tier-dead">Dead</span>';
+  return '';
+}
+function creditBarColor(tier) {
+  if (tier === 'normal') return 'var(--green)';
+  if (tier === 'low_compute') return 'var(--amber)';
+  if (tier === 'critical') return '#dc2626';
+  return '#9ca3af';
 }
 
 // ── Colors ──
@@ -552,6 +621,13 @@ function renderFocusPanel() {
         <div class="focus-stat"><div class="focus-stat-val">${a.discoveries||0}</div><div class="focus-stat-lbl">Found</div></div>
         <div class="focus-stat"><div class="focus-stat-val">${a.thoughtCount||0}</div><div class="focus-stat-lbl">Thoughts</div></div>
         <div class="focus-stat"><div class="focus-stat-val">${formatTokens(a.tokensUsed||0)}</div><div class="focus-stat-lbl">Tokens</div></div>
+      </div>
+      <div class="credit-bar-wrap" style="margin-bottom:8px">
+        <div class="credit-bar-row">
+          <span>Credits ${tierLabel((a.credits||{}).tier||'normal')}</span>
+          <span style="font-weight:600;color:${creditBarColor((a.credits||{}).tier||'normal')}">${((a.credits||{}).balance||100).toFixed(1)}cr</span>
+        </div>
+        <div class="credit-bar-track"><div class="credit-bar-fill" style="width:${Math.min(((a.credits||{}).balance||100)/200*100,100).toFixed(0)}%;background:${creditBarColor((a.credits||{}).tier||'normal')}"></div></div>
       </div>
       <div class="token-bar-wrap" style="margin-bottom:10px">
         <div class="token-bar-track"><div class="token-bar-fill" style="width:${tokenPct}%"></div></div>
@@ -993,12 +1069,32 @@ async function refresh() {
       const initials = (a.name||'').slice(0,2);
       const action = (a.currentAction||'idle').length>22 ? a.currentAction.slice(0,22)+'..' : a.currentAction||'idle';
       const isFocused = a.id === focusedAgentId;
+      const cr = a.credits || { balance: 100, tier: 'normal' };
+      const tierDot = cr.tier === 'normal' ? 'var(--green)' : cr.tier === 'low_compute' ? 'var(--amber)' : '#dc2626';
       return `<div class="agent-row ${a.synchronized?'synced':''} ${isFocused?'focused':''}" onclick="openFocus('${a.id}')">
         <div class="agent-avatar" style="background:${color}">${initials}</div>
         <div class="agent-info"><div class="agent-name">${a.name}</div><div class="agent-action-text">${action}</div></div>
-        <div class="agent-discoveries">${a.discoveries}</div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
+          <div class="agent-discoveries">${a.discoveries}</div>
+          <div style="display:flex;align-items:center;gap:3px;font-size:9.5px;color:var(--text-3)">
+            <div style="width:5px;height:5px;border-radius:50%;background:${tierDot}"></div>
+            ${cr.balance.toFixed(0)}cr
+          </div>
+        </div>
       </div>`;
     }).join('');
+
+    // Header credits pill
+    const totalCredits = agentsRes.reduce((s,a) => s + ((a.credits||{}).balance||0), 0);
+    const lowestTier = agentsRes.some(a => (a.credits||{}).tier === 'dead') ? 'dead'
+      : agentsRes.some(a => (a.credits||{}).tier === 'critical') ? 'critical'
+      : agentsRes.some(a => (a.credits||{}).tier === 'low_compute') ? 'low_compute' : 'normal';
+    const pill = document.getElementById('h-credits-pill');
+    if (lowestTier !== 'normal') {
+      pill.style.background = lowestTier === 'dead' ? '#f3f4f6' : lowestTier === 'critical' ? '#fee2e2' : 'var(--amber-soft)';
+      pill.style.borderColor = lowestTier === 'dead' ? '#d1d5db' : lowestTier === 'critical' ? '#fca5a5' : '#fde68a';
+    } else { pill.style.background = ''; pill.style.borderColor = ''; }
+    document.getElementById('h-credits').textContent = totalCredits.toFixed(0) + 'cr';
 
     // Live thoughts
     const items = thoughtsRes.length > 0 ? thoughtsRes : pheromones.sort((a,b)=>b.timestamp-a.timestamp);
@@ -1022,6 +1118,8 @@ async function refresh() {
       const color = getColor(a.id);
       const initials = (a.name||'').slice(0,2);
       const tokenPct = Math.min((a.tokensUsed||0)/(a.tokenBudget||1)*100,100).toFixed(0);
+      const cr = a.credits || { balance: 100, earned: 0, spent: 0, tier: 'normal' };
+      const crPct = Math.min((cr.balance/200)*100, 100).toFixed(0);
       return `<div class="agent-card" onclick="switchTab('live');setTimeout(()=>openFocus('${a.id}'),50)" style="cursor:pointer">
         <div class="agent-card-header">
           <div class="agent-card-avatar" style="background:${color}">${initials}</div>
@@ -1032,6 +1130,14 @@ async function refresh() {
           <div class="stat-box"><div class="stat-box-val">${a.discoveries||0}</div><div class="stat-box-lbl">Found</div></div>
           <div class="stat-box"><div class="stat-box-val">${a.thoughtCount||0}</div><div class="stat-box-lbl">Thoughts</div></div>
           <div class="stat-box"><div class="stat-box-val">${a.absorbed||0}</div><div class="stat-box-lbl">Absorbed</div></div>
+        </div>
+        <div class="credit-bar-wrap">
+          <div class="credit-bar-row">
+            <span>Credits ${tierLabel(cr.tier)}</span>
+            <span style="font-weight:600;color:${creditBarColor(cr.tier)}">${cr.balance.toFixed(1)}cr</span>
+          </div>
+          <div class="credit-bar-track"><div class="credit-bar-fill" style="width:${crPct}%;background:${creditBarColor(cr.tier)}"></div></div>
+          <div class="selfmod-tag">+${cr.earned.toFixed(1)} earned · -${cr.spent.toFixed(1)} spent</div>
         </div>
         <div class="token-bar-wrap">
           <div class="token-bar-label"><span>Token budget</span><span>${formatTokens(a.tokensUsed||0)} / ${formatTokens(a.tokenBudget||0)}</span></div>
@@ -1057,6 +1163,41 @@ async function refresh() {
           </div>`;
         }).join('')
       : '<div class="empty-state"><div class="empty-state-icon">◎</div>No pheromones yet</div>';
+
+    // Credits tab
+    document.getElementById('credits-grid').innerHTML = agentsRes.map(a => {
+      const color = getColor(a.id);
+      const cr = a.credits || { balance: 100, earned: 0, spent: 0, tier: 'normal', distressEmitted: false };
+      const crPct = Math.min((cr.balance / 200) * 100, 100).toFixed(0);
+      return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow)">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+          <div style="width:36px;height:36px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;color:white;font-size:12px;font-weight:700">${(a.name||'').slice(0,2)}</div>
+          <div>
+            <div style="font-weight:700;font-size:13px">${a.name}</div>
+            <div style="font-size:11px;color:var(--text-3);margin-top:1px">${a.specialization||''} ${tierLabel(cr.tier)}</div>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:12px">
+          <div style="background:var(--bg);border-radius:var(--radius-sm);padding:6px;text-align:center">
+            <div style="font-size:18px;font-weight:700;color:${creditBarColor(cr.tier)}">${cr.balance.toFixed(1)}</div>
+            <div style="font-size:9.5px;color:var(--text-3);text-transform:uppercase">Balance</div>
+          </div>
+          <div style="background:var(--bg);border-radius:var(--radius-sm);padding:6px;text-align:center">
+            <div style="font-size:18px;font-weight:700;color:var(--green)">+${cr.earned.toFixed(1)}</div>
+            <div style="font-size:9.5px;color:var(--text-3);text-transform:uppercase">Earned</div>
+          </div>
+          <div style="background:var(--bg);border-radius:var(--radius-sm);padding:6px;text-align:center">
+            <div style="font-size:18px;font-weight:700;color:#dc2626">-${cr.spent.toFixed(1)}</div>
+            <div style="font-size:9.5px;color:var(--text-3);text-transform:uppercase">Spent</div>
+          </div>
+        </div>
+        <div class="credit-bar-track" style="margin-bottom:8px"><div class="credit-bar-fill" style="width:${crPct}%;background:${creditBarColor(cr.tier)}"></div></div>
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-3)">
+          <span>Tokens: <strong>${formatTokens(a.tokensUsed||0)}</strong></span>
+          <span style="${cr.distressEmitted?'color:#dc2626;font-weight:600':''}${cr.distressEmitted?' ':'display:none'}"">⚠ Distress</span>
+        </div>
+      </div>`;
+    }).join('');
 
     // Collective tab
     document.getElementById('collective-list').innerHTML = collectRes.length > 0

@@ -14,6 +14,7 @@ import { formThought, synthesizeKnowledge } from "./thinker";
 import { generateCandidateDecisions, selectDecision, shouldSwitch } from "./decider";
 import { executeDecision } from "./executor";
 import { saveThought, saveDecision, updateDecisionStatus, savePheromone } from "./persistence";
+import { initCredits, earnCredits, spendCredits, creditForFinding } from "./credits";
 
 /**
  * Swarm Science Agent
@@ -104,6 +105,7 @@ export class SwarmAgent {
       specialization,
       personality,
       currentAction: "initializing",
+      credits: initCredits(100),
     };
   }
 
@@ -114,9 +116,18 @@ export class SwarmAgent {
   private shouldDoEngineering(): boolean {
     if (!this.engineeringEnabled) return false;
     if (this.state.tokensUsed >= this.state.tokenBudget) return false;
+    // Credit tier gates LLM access
+    const tier = this.state.credits.tier;
+    if (tier === "critical" || tier === "dead") return false;
     const step = this.state.stepCount;
     const probability = Math.min(0.85, step / 40);
     return Math.random() < probability;
+  }
+
+  /** Track tokens used and deduct credits accordingly */
+  private trackTokens(tokensUsed: number): void {
+    this.state.tokensUsed += tokensUsed;
+    this.state.credits = spendCredits(this.state.credits, tokensUsed);
   }
 
   async step(channel: PheromoneChannel): Promise<Pheromone | null> {
@@ -153,7 +164,7 @@ export class SwarmAgent {
       if (absorbed.length > 0 && this.state.personality.sociability > 0.4) {
         const { thought: synthThought, tokensUsed } = await synthesizeKnowledge(this.state, absorbed);
         thought = synthThought;
-        this.state.tokensUsed += tokensUsed;
+        this.trackTokens(tokensUsed);
       } else {
         const datasetsAnalyzed = this.state.reposStudied.length;
         const { thought: ft, tokensUsed } = await formThought(
@@ -163,7 +174,7 @@ export class SwarmAgent {
           `Specialization: ${this.state.specialization}, energy: ${this.state.energy.toFixed(2)}`
         );
         thought = ft;
-        this.state.tokensUsed += tokensUsed;
+        this.trackTokens(tokensUsed);
       }
 
       if (thought) {
@@ -197,6 +208,7 @@ export class SwarmAgent {
       try { saveDecision(decision); } catch { /* DB not ready */ }
 
       const result = await executeDecision(this.state, decision, this.discoveredDatasets);
+      if (result.tokensUsed > 0) this.trackTokens(result.tokensUsed);
 
       decision.status = result.success ? "completed" : "failed";
       decision.result = result;
@@ -233,6 +245,7 @@ export class SwarmAgent {
     }
 
     const result = await executeDecision(this.state, decision, this.discoveredDatasets);
+    if (result.tokensUsed > 0) this.trackTokens(result.tokensUsed);
     decision.result = result;
 
     if (result.success || decision.status !== "executing") {
@@ -271,6 +284,13 @@ export class SwarmAgent {
 
     this.state.knowledge.push(pheromone);
     this.state.discoveries++;
+
+    // Earn credits for the finding based on confidence
+    const { amount, reason: earnReason } = creditForFinding(pheromone.confidence);
+    if (amount > 0) {
+      this.state.credits = earnCredits(this.state.credits, amount, earnReason);
+    }
+
     // Persist to SQLite + disperse to EigenDA for decentralized attestation
     try { savePheromone(pheromone); } catch { /* DB not ready */ }
     return pheromone;

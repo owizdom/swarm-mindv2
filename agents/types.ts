@@ -181,6 +181,18 @@ export interface Artifact {
   content: string;
 }
 
+/** Survival tier — determines model access and capability gating */
+export type SurvivalTier = "normal" | "low_compute" | "critical" | "dead";
+
+/** Conway-inspired credit economy state */
+export interface CreditState {
+  balance: number;
+  earned: number;
+  spent: number;
+  tier: SurvivalTier;
+  distressEmitted: boolean;
+}
+
 /** Extended agent state for autonomous science */
 export interface AutonomousAgentState extends AgentState {
   thoughts: AgentThought[];
@@ -193,6 +205,8 @@ export interface AutonomousAgentState extends AgentState {
   specialization: string;
   personality: AgentPersonality;
   currentAction: string;
+  // Conway features
+  credits: CreditState;
 }
 
 /** Collaborative project detected among agents */

@@ -172,6 +172,7 @@ export function scoreDecision(
   if (action.type === "share_finding") personalFit = p.sociability * 0.15;
   if (action.type === "correlate_findings") personalFit = ((p.curiosity + p.diligence) / 2) * 0.15;
 
+
   const swarmBonus = channel.phaseTransitionOccurred && action.type === "correlate_findings" ? 0.10 : 0;
 
   return base + efficiency + novelty + personalFit + swarmBonus;
