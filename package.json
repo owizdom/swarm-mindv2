@@ -6,7 +6,11 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/agents/swarm.js",
+    "start:multi": "bash start-local.sh",
+    "start:docker": "docker compose up --build",
     "dev": "tsx watch agents/swarm.ts",
+    "dev:agent": "tsx agents/runner.ts",
+    "dev:dashboard": "tsx dashboard/server-multi.ts",
     "deploy": "bash scripts/deploy.sh"
   },
   "dependencies": {

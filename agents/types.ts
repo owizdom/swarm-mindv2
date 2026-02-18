@@ -10,7 +10,9 @@ export interface Pheromone {
   strength: number;          // Decays over time, boosted when others confirm
   connections: string[];     // IDs of related pheromones
   timestamp: number;
-  attestation: string;       // SHA-256 hash for verification
+  attestation: string;       // Ed25519 sig: "ed25519:<sig>:<pubkey>" or SHA-256 fallback
+  agentPubkey?: string;      // Agent's Ed25519 public key (hex) for verification
+  eigendaCommitment?: string; // KZG commitment from EigenDA once anchored
 }
 
 /** What each agent knows and is doing */
@@ -181,6 +183,13 @@ export interface Artifact {
   content: string;
 }
 
+/** Cryptographic identity — generated at startup, hardware-rooted on EigenCompute TEE */
+export interface AgentIdentity {
+  publicKey: string;   // hex-encoded Ed25519 SPKI
+  fingerprint: string; // sha256(pubkey).slice(0,16) — shown in UI
+  createdAt: number;
+}
+
 /** Extended agent state for autonomous science */
 export interface AutonomousAgentState extends AgentState {
   thoughts: AgentThought[];
@@ -193,6 +202,7 @@ export interface AutonomousAgentState extends AgentState {
   specialization: string;
   personality: AgentPersonality;
   currentAction: string;
+  identity: AgentIdentity;    // Cryptographic identity (TEE keypair on EigenCompute)
 }
 
 /** Collaborative project detected among agents */

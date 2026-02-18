@@ -482,6 +482,7 @@
       <div class="tab-group-label mc" style="font-size:7px;margin-top:8px">Analysis</div>
       <button class="tab-btn" onclick="switchTab('report')"><span class="tab-icon">◷</span> Report</button>
       <button class="tab-btn" onclick="switchTab('collective')"><span class="tab-icon">◈</span> Collective</button>
+      <button class="tab-btn" onclick="switchTab('attestation')"><span class="tab-icon">◉</span> Verify</button>
     </div>
 
     <div class="content">
@@ -554,6 +555,37 @@
         </div>
       </div>
 
+      <!-- Attestation tab -->
+      <div class="tab-panel" id="panel-attestation">
+        <div style="flex:1;overflow-y:auto;padding:18px">
+          <div style="max-width:860px;margin:0 auto">
+            <div style="margin-bottom:18px;display:flex;align-items:center;gap:12px">
+              <div style="font-size:15px;font-weight:700">Verifiable Agent Identity</div>
+              <div style="font-size:10px;padding:2px 8px;border-radius:4px;background:rgba(99,102,241,.15);color:#818cf8;border:1px solid rgba(99,102,241,.3)">Powered by EigenCompute + EigenDA</div>
+            </div>
+            <div style="font-size:11.5px;color:var(--text-3);margin-bottom:20px;line-height:1.6">
+              Each agent runs in its own isolated process with a unique Ed25519 keypair. Every pheromone is signed — you can verify any agent's output without trusting a central server. On EigenCompute, the keypair is hardware-generated inside a TEE and bound to a TDX attestation quote.
+            </div>
+
+            <!-- EigenDA status bar -->
+            <div id="eigenda-status-bar" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:12px">
+              <div id="eigenda-dot" style="width:8px;height:8px;border-radius:50%;background:var(--text-3)"></div>
+              <div>
+                <div style="font-size:11.5px;font-weight:600" id="eigenda-label">EigenDA — checking...</div>
+                <div style="font-size:10px;color:var(--text-3)" id="eigenda-sub"></div>
+              </div>
+            </div>
+
+            <!-- Per-agent attestation cards -->
+            <div id="attestation-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;margin-bottom:22px"></div>
+
+            <!-- Live verified pheromones -->
+            <div style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px">Latest Verified Signals</div>
+            <div id="verified-pheromones"></div>
+          </div>
+        </div>
+      </div>
+
     </div>
   </div>
 </div>
@@ -616,7 +648,7 @@ function timeSince(ts) {
 
 // ── Tab switching ──
 function switchTab(name) {
-  const names = ['live','agents','pheromones','report','collective'];
+  const names = ['live','agents','pheromones','report','collective','attestation'];
   document.querySelectorAll('.tab-btn').forEach((b,i) => b.classList.toggle('active', names[i] === name));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
   document.getElementById('panel-'+name).classList.add('active');
@@ -1428,8 +1460,92 @@ async function refresh() {
 
     if (focusedAgentId) renderFocusPanel();
     if (document.getElementById('panel-report').classList.contains('active')) fetchReport();
+    if (document.getElementById('panel-attestation').classList.contains('active')) fetchAttestation();
 
   } catch {}
+}
+
+// ── Attestation ──────────────────────────────────────────────────
+async function fetchAttestation() {
+  try {
+    const [proofs, state] = await Promise.all([
+      fetch(API+'/api/attestations').then(r=>r.json()),
+      fetch(API+'/api/state').then(r=>r.json()),
+    ]);
+
+    // EigenDA status
+    const da = state.eigenDA || {};
+    const daEnabled = da.enabled;
+    const dot = document.getElementById('eigenda-dot');
+    const label = document.getElementById('eigenda-label');
+    const sub = document.getElementById('eigenda-sub');
+    dot.style.background = daEnabled ? 'var(--green)' : 'var(--amber)';
+    label.textContent = daEnabled ? 'EigenDA — Connected (KZG commitments active)' : 'EigenDA — Offline (SHA-256 fallback)';
+    sub.textContent = daEnabled
+      ? `${da.attestedPheromones||0} pheromones anchored to EigenDA · KZG commitments verifiable by anyone`
+      : 'Set EIGENDA_PROXY_URL and run the proxy to enable real KZG attestation';
+
+    // Per-agent attestation cards
+    const grid = document.getElementById('attestation-grid');
+    if (proofs && proofs.length > 0) {
+      grid.innerHTML = proofs.filter(Boolean).map(proof => {
+        const color = getColor(proof.agent?.id || '');
+        const tee = proof.compute?.teeMode;
+        const latest = proof.latestPheromone;
+        return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px">
+          <div style="display:flex;align-items:center;gap:9px;margin-bottom:12px">
+            <div style="width:32px;height:32px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;color:white;font-size:11px;font-weight:700">${(proof.agent?.name||'').slice(0,2)}</div>
+            <div>
+              <div style="font-weight:700;font-size:13px">${proof.agent?.name||'?'}</div>
+              <div style="font-size:10px;color:var(--text-3)">${tee ? '🔒 EigenCompute TEE' : '🔑 Ed25519 Identity'}</div>
+            </div>
+          </div>
+          <div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Public Key Fingerprint</div>
+          <div style="font-family:monospace;font-size:11px;word-break:break-all;margin-bottom:10px;color:var(--text)">${proof.agent?.fingerprint||'—'}</div>
+          ${latest ? `
+          <div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Latest Signal</div>
+          <div style="font-size:10.5px;background:var(--surface-2);border-radius:4px;padding:6px 8px;margin-bottom:6px">${(latest.content||'').slice(0,100)}...</div>
+          <div style="display:flex;align-items:center;gap:6px;font-size:10px">
+            <span style="color:${latest.verified?'var(--green)':'var(--red)'}">
+              ${latest.verified ? '✓ Signature verified' : '✗ Unverified'}
+            </span>
+            ${latest.eigenda ? `<span style="color:#818cf8">· EigenDA: ${latest.eigenda.slice(0,12)}…</span>` : ''}
+          </div>` : '<div style="font-size:10px;color:var(--text-3)">No signals yet</div>'}
+          <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:10px;color:var(--text-3)">
+            Discoveries: ${proof.stats?.discoveriesTotal||0} · Synced: ${proof.stats?.synchronized?'yes':'no'}
+          </div>
+        </div>`;
+      }).join('');
+    } else {
+      grid.innerHTML = '<div class="empty"><div class="empty-icon">·</div>Agents not responding</div>';
+    }
+
+    // Verified pheromones
+    const pheroRes = await fetch(API+'/api/pheromones').then(r=>r.json());
+    const verifiedList = document.getElementById('verified-pheromones');
+    const withSig = pheroRes.filter(p => p.attestation?.startsWith('ed25519:'));
+    if (withSig.length > 0) {
+      verifiedList.innerHTML = withSig.slice(0,8).map(p => {
+        const color = getColor(p.agentId);
+        const ag = agents.find(a=>a.id===p.agentId);
+        return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:6px;display:flex;gap:10px;align-items:flex-start">
+          <div style="width:6px;height:6px;border-radius:50%;background:${color};margin-top:5px;flex-shrink:0"></div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:11px;margin-bottom:2px">${(p.content||'').slice(0,120)}</div>
+            <div style="font-size:10px;color:var(--text-3)">${ag?.name||p.agentId.slice(0,8)} · ${p.domain}</div>
+          </div>
+          <div style="text-align:right;flex-shrink:0">
+            <div style="font-size:10px;color:var(--green);white-space:nowrap">✓ signed</div>
+            ${p.eigendaCommitment ? `<div style="font-size:9px;color:#818cf8;font-family:monospace">${p.eigendaCommitment.slice(0,10)}…</div>` : ''}
+          </div>
+        </div>`;
+      }).join('');
+    } else {
+      verifiedList.innerHTML = '<div class="empty"><div class="empty-icon">·</div>No signed pheromones yet</div>';
+    }
+  } catch(e) {
+    console.error('attestation fetch error', e);
+  }
 }
 
 setInterval(refresh, 600);

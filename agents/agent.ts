@@ -9,6 +9,7 @@ import {
   ScienceDataset,
   hash,
 } from "./types";
+import { generateKeypair, buildAttestation } from "./keystore";
 import { fetchDataset, getRandomTopic } from "./science";
 import { formThought, synthesizeKnowledge } from "./thinker";
 import { generateCandidateDecisions, selectDecision, shouldSwitch } from "./decider";
@@ -66,6 +67,7 @@ export class SwarmAgent {
   state: AutonomousAgentState;
   private discoveredDatasets: ScienceDataset[] = [];
   private engineeringEnabled: boolean = false;
+  private keypair = generateKeypair();
 
   constructor(index: number) {
     const angle = (index / 8) * Math.PI * 2;
@@ -104,6 +106,11 @@ export class SwarmAgent {
       specialization,
       personality,
       currentAction: "initializing",
+      identity: {
+        publicKey:   this.keypair.publicKey,
+        fingerprint: this.keypair.fingerprint,
+        createdAt:   Date.now(),
+      },
     };
   }
 
@@ -263,6 +270,7 @@ export class SwarmAgent {
       ? (decision.action as { topic: string }).topic
       : this.state.explorationTarget;
 
+    const ts = Date.now();
     const pheromone: Pheromone = {
       id: uuid(),
       agentId: this.state.id,
@@ -271,8 +279,9 @@ export class SwarmAgent {
       confidence: decision.priority,
       strength: 0.65 + decision.priority * 0.3,
       connections: [],
-      timestamp: Date.now(),
-      attestation: hash(result.summary + this.state.id + Date.now()),
+      timestamp: ts,
+      attestation: buildAttestation(result.summary, this.state.id, ts, this.keypair.privateKey, this.keypair.publicKey),
+      agentPubkey: this.keypair.publicKey,
     };
 
     this.state.knowledge.push(pheromone);
@@ -317,6 +326,7 @@ export class SwarmAgent {
 
       console.log(`    ${this.state.name} scanned ${dataset.topic}: ${highlight.slice(0, 60)}`);
 
+      const ts = Date.now();
       const pheromone: Pheromone = {
         id: uuid(),
         agentId: this.state.id,
@@ -325,8 +335,9 @@ export class SwarmAgent {
         confidence,
         strength: 0.5 + confidence * 0.3,
         connections,
-        timestamp: Date.now(),
-        attestation: hash(content + this.state.id + Date.now()),
+        timestamp: ts,
+        attestation: buildAttestation(content, this.state.id, ts, this.keypair.privateKey, this.keypair.publicKey),
+        agentPubkey: this.keypair.publicKey,
       };
 
       this.state.knowledge.push(pheromone);

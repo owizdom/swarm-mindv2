@@ -1,0 +1,119 @@
+version: "3.9"
+
+# ══════════════════════════════════════════════════════════════════════
+#  SWARM MIND — EigenCloud Architecture
+#
+#  3 independent agent containers, no shared state, no coordinator.
+#  EigenDA proxy provides real KZG attestation for every pheromone.
+#  Dashboard reads from all 3 agent APIs directly.
+# ══════════════════════════════════════════════════════════════════════
+
+# Shared environment for all agents
+x-common-env: &common-env
+  LLM_PROVIDER:           ${LLM_PROVIDER:-anthropic}
+  ANTHROPIC_API_KEY:      ${ANTHROPIC_API_KEY:-}
+  ANTHROPIC_MODEL:        ${ANTHROPIC_MODEL:-claude-sonnet-4-5}
+  EIGENAI_API_KEY:        ${EIGENAI_API_KEY:-}
+  EIGENAI_API_URL:        ${EIGENAI_API_URL:-https://api.eigenai.xyz/v1}
+  EIGENAI_MODEL:          ${EIGENAI_MODEL:-gpt-oss-120b-f16}
+  OPENAI_API_KEY:         ${OPENAI_API_KEY:-}
+  NASA_API_KEY:           ${NASA_API_KEY:-DEMO_KEY}
+  TOKEN_BUDGET_PER_AGENT: ${TOKEN_BUDGET_PER_AGENT:-50000}
+  SYNC_INTERVAL_MS:       ${SYNC_INTERVAL_MS:-2000}
+  PHEROMONE_DECAY:        ${PHEROMONE_DECAY:-0.12}
+  CRITICAL_DENSITY:       ${CRITICAL_DENSITY:-0.55}
+  EIGENDA_PROXY_URL:      http://eigenda-proxy:4242
+
+services:
+
+  # ── EigenDA Proxy ─────────────────────────────────────────────────
+  eigenda-proxy:
+    image: ghcr.io/layr-labs/eigenda-proxy:latest
+    command: ["--memstore.enabled", "--addr=0.0.0.0", "--port=4242"]
+    ports:
+      - "4242:4242"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4242/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── Agent Kepler (Observer) ────────────────────────────────────────
+  agent-kepler:
+    build: .
+    container_name: swarm-kepler
+    restart: unless-stopped
+    environment:
+      <<: *common-env
+      AGENT_INDEX: "0"
+      AGENT_PORT:  "3001"
+      DB_PATH:     "/data/kepler.db"
+      PEER_URLS:   "http://agent-hubble:3002,http://agent-voyager:3003"
+    ports:
+      - "3001:3001"
+    volumes:
+      - kepler-data:/data
+    depends_on:
+      eigenda-proxy:
+        condition: service_healthy
+
+  # ── Agent Hubble (Synthesizer) ─────────────────────────────────────
+  agent-hubble:
+    build: .
+    container_name: swarm-hubble
+    restart: unless-stopped
+    environment:
+      <<: *common-env
+      AGENT_INDEX: "1"
+      AGENT_PORT:  "3002"
+      DB_PATH:     "/data/hubble.db"
+      PEER_URLS:   "http://agent-kepler:3001,http://agent-voyager:3003"
+    ports:
+      - "3002:3002"
+    volumes:
+      - hubble-data:/data
+    depends_on:
+      eigenda-proxy:
+        condition: service_healthy
+
+  # ── Agent Voyager (Analyst) ────────────────────────────────────────
+  agent-voyager:
+    build: .
+    container_name: swarm-voyager
+    restart: unless-stopped
+    environment:
+      <<: *common-env
+      AGENT_INDEX: "2"
+      AGENT_PORT:  "3003"
+      DB_PATH:     "/data/voyager.db"
+      PEER_URLS:   "http://agent-kepler:3001,http://agent-hubble:3002"
+    ports:
+      - "3003:3003"
+    volumes:
+      - voyager-data:/data
+    depends_on:
+      eigenda-proxy:
+        condition: service_healthy
+
+  # ── Dashboard ──────────────────────────────────────────────────────
+  dashboard:
+    build: .
+    container_name: swarm-dashboard
+    restart: unless-stopped
+    command: ["node", "dist/dashboard/server-multi.js"]
+    environment:
+      <<: *common-env
+      AGENT_URLS:     "http://agent-kepler:3001,http://agent-hubble:3002,http://agent-voyager:3003"
+      DASHBOARD_PORT: "3000"
+    ports:
+      - "3000:3000"
+    depends_on:
+      - agent-kepler
+      - agent-hubble
+      - agent-voyager
+
+volumes:
+  kepler-data:
+  hubble-data:
+  voyager-data:
