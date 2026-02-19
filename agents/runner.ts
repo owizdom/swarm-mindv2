@@ -331,6 +331,25 @@ async function run(): Promise<void> {
       }
     }
 
+    // ── Cycle reset: 18 steps after transition, wipe state and start fresh ──
+    // This drops density back to 0, un-syncs agents, and lets the swarm rebuild.
+    const CYCLE_COOLDOWN = 18;
+    if (
+      channel.phaseTransitionOccurred &&
+      channel.transitionStep !== null &&
+      step - channel.transitionStep >= CYCLE_COOLDOWN
+    ) {
+      console.log(`\n[${agent.state.name}] Cycle reset — new emergence cycle starting\n`);
+      channel.pheromones            = [];
+      channel.density               = 0;
+      channel.phaseTransitionOccurred = false;
+      channel.transitionStep        = null;
+      agent.state.synchronized      = false;
+      agent.state.syncedWith        = [];
+      agent.state.absorbed          = new Set();
+      agent.state.energy            = 0.3 + Math.random() * 0.2;
+    }
+
     // Agent step
     const pheromone = await agent.step(channel);
 

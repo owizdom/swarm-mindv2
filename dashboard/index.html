@@ -1387,6 +1387,16 @@ async function refresh() {
       setTimeout(()=>document.getElementById('flash').classList.remove('go'), 2500);
       triggerBurst();
       triggerScatterReset(); // scatter agents → rebuild neuron connections from scratch
+      // Auto-switch to Collective tab after a short delay so report has time to generate
+      setTimeout(() => {
+        switchTab('collective');
+        // Reload collective data immediately so the fresh report is visible
+        fetch('/api/collective').then(r=>r.json()).then(data => {
+          document.getElementById('collective-list').innerHTML = data.length > 0
+            ? data.slice(-10).reverse().map(renderMemory).join('')
+            : '<div class="empty"><div class="empty-icon">·</div>No collective memories yet</div>';
+        }).catch(()=>{});
+      }, 3500);
     }
     prevTransition = stateRes.phaseTransitionOccurred;
     if (stateRes.phaseTransitionOccurred) document.getElementById('h-phase').style.display = 'flex';
