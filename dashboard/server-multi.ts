@@ -161,6 +161,73 @@ app.get("/api/repos", async (_req, res) => {
   res.json(datasets);
 });
 
+// Report — aggregates thoughts, datasets, and collective memories for the Report tab
+app.get("/api/report", async (_req, res) => {
+  const [states, allThoughts, allCollective, repos] = await Promise.all([
+    fetchAllAgents("/state") as Promise<Array<Record<string, unknown>>>,
+    fetchAllAgents("/thoughts"),
+    fetchAllAgents("/collective"),
+    fetchAgent(AGENT_URLS[0], "/state").then(() => null).catch(() => null), // warm-up, unused
+  ]);
+
+  const validStates = (states as Array<Record<string, unknown>>).filter(Boolean);
+
+  // Top insights: best thoughts from each agent sorted by confidence
+  const thoughts = (allThoughts.flat() as Array<{
+    id: string; agentId: string; agentName?: string; conclusion?: string;
+    reasoning?: string; confidence?: number; trigger?: string; suggestedActions?: string[];
+  }>).filter(t => t.conclusion);
+
+  thoughts.sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+  const topInsights = thoughts.slice(0, 12).map(t => ({
+    agentName:        t.agentName || t.agentId?.slice(0, 8),
+    trigger:          t.trigger || "analysis",
+    confidence:       t.confidence || 0,
+    conclusion:       t.conclusion,
+    reasoning:        t.reasoning,
+    suggestedActions: t.suggestedActions || [],
+  }));
+
+  // Collective memories (deduplicated)
+  const seenMem = new Set<string>();
+  const collectiveMemories: unknown[] = [];
+  for (const m of allCollective.flat() as Array<{ id: string; createdAt: number }>) {
+    if (m?.id && !seenMem.has(m.id)) { seenMem.add(m.id); collectiveMemories.push(m); }
+  }
+  collectiveMemories.sort((a, b) =>
+    ((b as { createdAt: number }).createdAt || 0) - ((a as { createdAt: number }).createdAt || 0)
+  );
+
+  // Datasets studied
+  const seenDs = new Set<string>();
+  const reposStudied: Array<{ topic: string; timeRange: string; studiedBy: string[] }> = [];
+  for (const agent of validStates) {
+    for (const entry of (agent.reposStudied as string[]) || []) {
+      const [topic, ...rest] = entry.split(":");
+      const label = topic.replace(/_/g, " ");
+      if (!seenDs.has(entry)) {
+        seenDs.add(entry);
+        reposStudied.push({ topic: label, timeRange: rest.join(":") || "recent", studiedBy: [] });
+      }
+      const ds = reposStudied.find(d => d.topic === label);
+      if (ds && !(ds.studiedBy.includes(agent.name as string))) ds.studiedBy.push(agent.name as string);
+    }
+  }
+
+  // Per-agent summaries
+  const agentSummaries = validStates.map(agent => {
+    const agentThoughts = thoughts.filter(t => t.agentId === agent.id || t.agentName === agent.name);
+    return {
+      name:            agent.name,
+      specialization:  agent.specialization,
+      thoughtCount:    agent.thoughtCount || agentThoughts.length,
+      topConclusions:  agentThoughts.slice(0, 3),
+    };
+  });
+
+  res.json({ topInsights, collectiveMemories, reposStudied, agentSummaries });
+});
+
 app.get("/api/prs", (_req, res) => res.json([]));
 app.get("/api/decisions", async (_req, res) => res.json([]));
 
