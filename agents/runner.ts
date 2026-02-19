@@ -79,6 +79,8 @@ const channel: PheromoneChannel = {
 };
 
 let step = 0;
+let cycleResetAt = 0;         // timestamp of last cycle reset — pheromones older than this are ignored
+let noTransitionBeforeStep = 0; // prevents immediate re-transition right after reset
 const collectiveMemories: CollectiveMemory[] = [];
 
 // ── Collective report generation (triggered at phase transition) ──
@@ -175,7 +177,8 @@ async function pullFromPeers(): Promise<void> {
   for (const r of results) {
     if (r.status !== "fulfilled") continue;
     for (const p of r.value) {
-      if (!channel.pheromones.find(e => e.id === p.id)) {
+      // Ignore pheromones created before the last cycle reset — they belong to the old cycle
+      if (!channel.pheromones.find(e => e.id === p.id) && p.timestamp > cycleResetAt) {
         channel.pheromones.push(p);
       }
     }
@@ -280,7 +283,8 @@ app.get("/collective", (_, res) => {
 // Receive pheromone pushed by a peer
 app.post("/pheromone", (req, res) => {
   const p = req.body as Pheromone;
-  if (p?.id && !channel.pheromones.find(e => e.id === p.id)) {
+  // Reject pheromones from the previous cycle (created before last reset)
+  if (p?.id && !channel.pheromones.find(e => e.id === p.id) && p.timestamp > cycleResetAt) {
     channel.pheromones.push(p);
   }
   res.json({ ok: true });
@@ -316,7 +320,7 @@ async function run(): Promise<void> {
     updateDensity();
 
     // Check phase transition locally (no coordinator needed)
-    if (!channel.phaseTransitionOccurred) {
+    if (!channel.phaseTransitionOccurred && step >= noTransitionBeforeStep) {
       const synced = channel.pheromones.filter(p => p.strength > 0.4).length;
       if (channel.density >= channel.criticalThreshold && synced >= 3) {
         channel.phaseTransitionOccurred = true;
@@ -340,6 +344,8 @@ async function run(): Promise<void> {
       step - channel.transitionStep >= CYCLE_COOLDOWN
     ) {
       console.log(`\n[${agent.state.name}] Cycle reset — new emergence cycle starting\n`);
+      cycleResetAt                  = Date.now(); // timestamp gate — reject all old pheromones
+      noTransitionBeforeStep        = step + 8;  // enforce 8-step minimum before next transition
       channel.pheromones            = [];
       channel.density               = 0;
       channel.phaseTransitionOccurred = false;

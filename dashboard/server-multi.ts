@@ -129,16 +129,26 @@ app.get("/api/state", async (_req, res) => {
   });
 });
 
-// Collective memories — each agent generates its own at phase transition
+// Collective memories — collapse reports from the same transition cycle (30s window) into one
 app.get("/api/collective", async (_req, res) => {
   const all = await fetchAllAgents("/collective");
   const seen = new Set<string>();
-  const memories: unknown[] = [];
+  const memories: Array<{ id: string; createdAt: number }> = [];
   for (const m of all.flat() as Array<{ id: string; createdAt: number }>) {
     if (m?.id && !seen.has(m.id)) { seen.add(m.id); memories.push(m); }
   }
-  memories.sort((a, b) => ((b as { createdAt: number }).createdAt || 0) - ((a as { createdAt: number }).createdAt || 0));
-  res.json(memories);
+  memories.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+  // Group by 30-second windows — agents all fire within a few seconds of each other per transition
+  const WINDOW_MS = 30_000;
+  const windows = new Map<number, { id: string; createdAt: number }>();
+  for (const m of memories) {
+    const key = Math.floor((m.createdAt || 0) / WINDOW_MS);
+    // Keep the one with most content (most findings) or just the first seen
+    if (!windows.has(key)) windows.set(key, m);
+  }
+  const collapsed = [...windows.values()].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  res.json(collapsed);
 });
 
 // Repos/datasets studied
