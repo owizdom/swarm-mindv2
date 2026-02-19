@@ -319,41 +319,37 @@ async function run(): Promise<void> {
     // Update density locally
     updateDensity();
 
-    // Check phase transition locally (no coordinator needed)
+    // Check phase transition locally — reset channel IMMEDIATELY on detection
     if (!channel.phaseTransitionOccurred && step >= noTransitionBeforeStep) {
       const synced = channel.pheromones.filter(p => p.strength > 0.4).length;
       if (channel.density >= channel.criticalThreshold && synced >= 3) {
-        channel.phaseTransitionOccurred = true;
-        channel.transitionStep = step;
         console.log(`\n${"█".repeat(50)}`);
         console.log(`█  [${agent.state.name}] PHASE TRANSITION DETECTED — step ${step}`);
         console.log(`█  Density: ${channel.density.toFixed(3)} | Pheromones: ${channel.pheromones.length}`);
         console.log(`${"█".repeat(50)}\n`);
 
-        // Generate collective memory (fire-and-forget — doesn't block the loop)
+        // generateCollectiveMemory captures all data synchronously before its first await,
+        // so it's safe to clear the channel right after calling it.
         generateCollectiveMemory().catch(() => {});
-      }
-    }
 
-    // ── Cycle reset: 18 steps after transition, wipe state and start fresh ──
-    // This drops density back to 0, un-syncs agents, and lets the swarm rebuild.
-    const CYCLE_COOLDOWN = 18;
-    if (
-      channel.phaseTransitionOccurred &&
-      channel.transitionStep !== null &&
-      step - channel.transitionStep >= CYCLE_COOLDOWN
-    ) {
-      console.log(`\n[${agent.state.name}] Cycle reset — new emergence cycle starting\n`);
-      cycleResetAt                  = Date.now(); // timestamp gate — reject all old pheromones
-      noTransitionBeforeStep        = step + 8;  // enforce 8-step minimum before next transition
-      channel.pheromones            = [];
-      channel.density               = 0;
-      channel.phaseTransitionOccurred = false;
-      channel.transitionStep        = null;
-      agent.state.synchronized      = false;
-      agent.state.syncedWith        = [];
-      agent.state.absorbed          = new Set();
-      agent.state.energy            = 0.3 + Math.random() * 0.2;
+        // Immediate reset — density drops to 0 right now, not 36 seconds later
+        cycleResetAt           = Date.now(); // reject all pheromones older than this moment
+        noTransitionBeforeStep = step + 12; // 12-step lockout (24s) before next transition
+        channel.pheromones     = [];
+        channel.density        = 0;
+        agent.state.synchronized = false;
+        agent.state.syncedWith   = [];
+        agent.state.absorbed     = new Set();
+        agent.state.energy       = 0.3 + Math.random() * 0.2;
+
+        // Keep flag true briefly so the dashboard can detect the edge, then clear it
+        channel.phaseTransitionOccurred = true;
+        channel.transitionStep = step;
+        setTimeout(() => {
+          channel.phaseTransitionOccurred = false;
+          channel.transitionStep = null;
+        }, 5000);
+      }
     }
 
     // Agent step
