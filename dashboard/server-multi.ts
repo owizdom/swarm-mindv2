@@ -172,21 +172,41 @@ app.get("/api/report", async (_req, res) => {
 
   const validStates = (states as Array<Record<string, unknown>>).filter(Boolean);
 
-  // Top insights: best thoughts from each agent sorted by confidence
-  const thoughts = (allThoughts.flat() as Array<{
+  // Top insights: interleave best thoughts from EACH agent so report is truly collective
+  type Thought = {
     id: string; agentId: string; agentName?: string; conclusion?: string;
     reasoning?: string; confidence?: number; trigger?: string; suggestedActions?: string[];
-  }>).filter(t => t.conclusion);
+  };
+  const allFlat = (allThoughts.flat() as Thought[]).filter(t => t.conclusion);
 
-  thoughts.sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
-  const topInsights = thoughts.slice(0, 12).map(t => ({
-    agentName:        t.agentName || t.agentId?.slice(0, 8),
-    trigger:          t.trigger || "analysis",
-    confidence:       t.confidence || 0,
-    conclusion:       t.conclusion,
-    reasoning:        t.reasoning,
-    suggestedActions: t.suggestedActions || [],
-  }));
+  // Group by agent, sort each group by confidence
+  const byAgent = new Map<string, Thought[]>();
+  for (const t of allFlat) {
+    const key = t.agentName || t.agentId || "unknown";
+    if (!byAgent.has(key)) byAgent.set(key, []);
+    byAgent.get(key)!.push(t);
+  }
+  for (const [, arr] of byAgent) arr.sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+
+  // Round-robin interleave: take up to 4 from each agent
+  const topInsights: object[] = [];
+  const agentQueues = [...byAgent.values()];
+  const perAgent = 4;
+  for (let round = 0; round < perAgent; round++) {
+    for (const queue of agentQueues) {
+      if (queue[round]) {
+        const t = queue[round];
+        topInsights.push({
+          agentName:        t.agentName || t.agentId?.slice(0, 8),
+          trigger:          t.trigger || "analysis",
+          confidence:       t.confidence || 0,
+          conclusion:       t.conclusion,
+          reasoning:        t.reasoning,
+          suggestedActions: t.suggestedActions || [],
+        });
+      }
+    }
+  }
 
   // Collective memories (deduplicated)
   const seenMem = new Set<string>();
@@ -216,7 +236,7 @@ app.get("/api/report", async (_req, res) => {
 
   // Per-agent summaries
   const agentSummaries = validStates.map(agent => {
-    const agentThoughts = thoughts.filter(t => t.agentId === agent.id || t.agentName === agent.name);
+    const agentThoughts = allFlat.filter((t: Thought) => t.agentId === agent.id || t.agentName === agent.name);
     return {
       name:            agent.name,
       specialization:  agent.specialization,
