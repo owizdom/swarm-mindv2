@@ -1,6 +1,6 @@
 # Swarm Mind — NASA Science Mode
 
-**Autonomous AI agents that collectively study real NASA datasets, form scientific hypotheses, and produce cryptographically-attested research findings — without a leader.**
+**Autonomous AI agents that collectively study NASA datasets, form scientific hypotheses, and produce cryptographically-attested research findings — without a leader.**
 
 Built for the [EigenCloud Open Innovation Challenge](https://ideas.eigencloud.xyz/).
 
