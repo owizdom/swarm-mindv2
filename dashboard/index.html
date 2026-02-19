@@ -597,7 +597,7 @@ const API = window.location.origin;
 
 // ── State ──
 let agents = [], pheromones = [], thoughts = [];
-let prevTransition = false, focusedAgentId = null;
+let prevTransition = false, focusedAgentId = null, phaseBadgeTimer = null;
 let agentColors = {};
 const palette = ['#6366f1','#ec4899','#10b981','#f59e0b','#3b82f6','#8b5cf6','#06b6d4','#f43f5e'];
 
@@ -1221,7 +1221,10 @@ document.getElementById('inject-input').addEventListener('keydown', e => { if (e
 // ── Collective memory renderer ──
 function renderMemory(m) {
   const r = m.report;
-  const contribs = (m.contributors||[]).map(id => agents.find(a=>a.id===id)?.name || id.slice(0,6)).join(', ');
+  // Show all active agents as contributors — collective memory is a swarm product
+  const contribs = agents.length > 0
+    ? agents.map(a => a.name).join(' · ')
+    : (m.contributors||[]).map(id => agents.find(a=>a.id===id)?.name || id.slice(0,6)).join(' · ');
 
   let html = `<div class="collective-card">
     <div class="collective-title">${m.topic}</div>
@@ -1380,17 +1383,22 @@ async function refresh() {
     liveDensity = stateRes.density || 0;
     liveCriticalThreshold = stateRes.criticalThreshold || 0.55;
 
-    // Phase transition
+    // Phase transition — edge detect: only fires once per new transition
     if (stateRes.phaseTransitionOccurred && !prevTransition) {
-      document.getElementById('h-phase').style.display = 'flex';
+      // Show badge, auto-hide after 6s regardless of backend state
+      const badge = document.getElementById('h-phase');
+      badge.style.display = 'flex';
+      if (phaseBadgeTimer) clearTimeout(phaseBadgeTimer);
+      phaseBadgeTimer = setTimeout(() => { badge.style.display = 'none'; }, 6000);
+
       document.getElementById('flash').classList.add('go');
       setTimeout(()=>document.getElementById('flash').classList.remove('go'), 2500);
       triggerBurst();
-      triggerScatterReset(); // scatter agents → rebuild neuron connections from scratch
-      // Auto-switch to Collective tab after a short delay so report has time to generate
+      triggerScatterReset();
+
+      // Auto-switch to Collective tab — delay so report has time to generate
       setTimeout(() => {
         switchTab('collective');
-        // Reload collective data immediately so the fresh report is visible
         fetch('/api/collective').then(r=>r.json()).then(data => {
           document.getElementById('collective-list').innerHTML = data.length > 0
             ? data.slice(-10).reverse().map(renderMemory).join('')
@@ -1399,7 +1407,6 @@ async function refresh() {
       }, 3500);
     }
     prevTransition = stateRes.phaseTransitionOccurred;
-    if (stateRes.phaseTransitionOccurred) document.getElementById('h-phase').style.display = 'flex';
 
     // Density bar
     const density = stateRes.density||0;
