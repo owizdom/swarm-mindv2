@@ -36,23 +36,39 @@ echo "[2/5] Building TypeScript..."
 npx tsc --noEmit 2>&1 | head -20 || true
 npx tsc 2>&1 | tail -5
 
+# ── Dashboard / Coordinator (starts FIRST so agents can poll it) ──
+echo "[3/5] Starting Dashboard + Coordinator..."
+AGENT_URLS=http://localhost:3002,http://localhost:3003,http://localhost:3004 \
+DASHBOARD_PORT=3001 \
+EIGENDA_PROXY_URL=http://localhost:4242 \
+EIGENDA_ENABLED=true \
+node dist/dashboard/server-multi.js 2>&1 | sed 's/^/\033[32m[Dash]   \033[0m/' &
+DASH_PID=$!
+
+sleep 2
+
 # ── Agent Kepler ──────────────────────────────────────
-echo "[3/5] Starting Agent Kepler (Observer)..."
+echo "[4/5] Starting agents..."
 AGENT_INDEX=0 \
-AGENT_PORT=3001 \
+AGENT_PORT=3002 \
 DB_PATH=./swarm-kepler.db \
-PEER_URLS=http://localhost:3002,http://localhost:3003 \
+COORDINATOR_URL=http://localhost:3001 \
+PEER_URLS=http://localhost:3003,http://localhost:3004 \
+EIGENDA_PROXY_URL=http://localhost:4242 \
+EIGENDA_ENABLED=true \
 node dist/agents/runner.js 2>&1 | sed 's/^/\033[36m[Kepler] \033[0m/' &
 KEPLER_PID=$!
 
 sleep 1
 
 # ── Agent Hubble ──────────────────────────────────────
-echo "[4/5] Starting Agent Hubble (Synthesizer)..."
 AGENT_INDEX=1 \
-AGENT_PORT=3002 \
+AGENT_PORT=3003 \
 DB_PATH=./swarm-hubble.db \
-PEER_URLS=http://localhost:3001,http://localhost:3003 \
+COORDINATOR_URL=http://localhost:3001 \
+PEER_URLS=http://localhost:3002,http://localhost:3004 \
+EIGENDA_PROXY_URL=http://localhost:4242 \
+EIGENDA_ENABLED=true \
 node dist/agents/runner.js 2>&1 | sed 's/^/\033[35m[Hubble] \033[0m/' &
 HUBBLE_PID=$!
 
@@ -60,27 +76,23 @@ sleep 1
 
 # ── Agent Voyager ─────────────────────────────────────
 AGENT_INDEX=2 \
-AGENT_PORT=3003 \
+AGENT_PORT=3004 \
 DB_PATH=./swarm-voyager.db \
-PEER_URLS=http://localhost:3001,http://localhost:3002 \
+COORDINATOR_URL=http://localhost:3001 \
+PEER_URLS=http://localhost:3002,http://localhost:3003 \
+EIGENDA_PROXY_URL=http://localhost:4242 \
+EIGENDA_ENABLED=true \
 node dist/agents/runner.js 2>&1 | sed 's/^/\033[33m[Voyager]\033[0m/' &
 VOYAGER_PID=$!
 
-sleep 2
-
-# ── Dashboard ─────────────────────────────────────────
-echo "[5/5] Starting Dashboard..."
-AGENT_URLS=http://localhost:3001,http://localhost:3002,http://localhost:3003 \
-DASHBOARD_PORT=3000 \
-node dist/dashboard/server-multi.js 2>&1 | sed 's/^/\033[32m[Dash]   \033[0m/' &
-DASH_PID=$!
-
 echo ""
 echo "═══════════════════════════════════════════════════"
-echo "  Dashboard  →  http://localhost:3000"
-echo "  Kepler     →  http://localhost:3001/attestation"
-echo "  Hubble     →  http://localhost:3002/attestation"
-echo "  Voyager    →  http://localhost:3003/attestation"
+echo "  Dashboard  →  http://localhost:3001"
+echo "  Evidence   →  http://localhost:3001/api/evidence"
+echo "  Coordinator→  http://localhost:3001/api/coordinator"
+echo "  Kepler     →  http://localhost:3002/attestation"
+echo "  Hubble     →  http://localhost:3003/attestation"
+echo "  Voyager    →  http://localhost:3004/attestation"
 echo "  EigenDA    →  http://localhost:4242"
 echo "═══════════════════════════════════════════════════"
 echo ""

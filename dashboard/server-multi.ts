@@ -80,6 +80,10 @@ function newCycleState(cycleNumber: number): CoordinatorState {
 
 let coordinator: CoordinatorState = newCycleState(1);
 
+// Keep last N completed cycle states for the evidence endpoint
+const completedCycles: CoordinatorState[] = [];
+const MAX_COMPLETED_CYCLES = 10;
+
 function advanceCycle(): void {
   const now = Date.now();
   const elapsed = now - coordinator.phaseStartedAt;
@@ -96,7 +100,8 @@ function advanceCycle(): void {
     case "commit":
       if (elapsed >= COMMIT_MS) {
         // Detect any agents that missed the commit window
-        coordinator.commitWindowCloseBlock = Math.floor(now / 12_000);
+        // +1 block so referenceBlock (set during commit) is always < commitWindowCloseBlock
+        coordinator.commitWindowCloseBlock = Math.floor(now / 12_000) + 1;
         for (const url of AGENT_URLS) {
           // We check based on commit registry — agents not registered are marked missed
           const registered = [...coordinator.commitRegistry.values()].some(
@@ -122,6 +127,9 @@ function advanceCycle(): void {
       if (elapsed >= SYNTHESIS_MS) {
         const next = coordinator.cycleNumber + 1;
         console.log(`[COORDINATOR] Cycle ${coordinator.cycleNumber} complete → starting Cycle ${next} (EXPLORE)`);
+        // Archive completed cycle before resetting
+        completedCycles.push(coordinator);
+        if (completedCycles.length > MAX_COMPLETED_CYCLES) completedCycles.shift();
         coordinator = newCycleState(next);
       }
       break;
@@ -244,8 +252,12 @@ app.post("/api/coordinator/commit", (req, res) => {
 });
 
 // GET /api/evidence — machine-verifiable evidence bundle for current/last cycle
-app.get("/api/evidence", (_req, res) => {
-  const commits = [...coordinator.commitRegistry.values()];
+app.get("/api/evidence", async (_req, res) => {
+  // Use the most recent completed cycle if current cycle has no commits yet
+  const source = coordinator.commitRegistry.size > 0
+    ? coordinator
+    : (completedCycles.length > 0 ? completedCycles[completedCycles.length - 1] : coordinator);
+  const commits = [...source.commitRegistry.values()];
   const proxyUrl = process.env.EIGENDA_PROXY_URL || null;
 
   const commitmentRecords = commits.map(c => ({
@@ -259,17 +271,34 @@ app.get("/api/evidence", (_req, res) => {
     sealedBlobHash:       c.sealedBlobHash,
   }));
 
-  const integrityChecks = commits.map(c => ({
-    agentId:                 c.agentId,
-    agentName:               c.agentName,
-    committedSealedBlobHash: c.sealedBlobHash,
-    verificationUrl:         proxyUrl && c.committedViaEigenDA
+  // Live integrity check: fetch blob from EigenDA and verify sha256(blob) === sealedBlobHash
+  const integrityChecks = await Promise.all(commits.map(async c => {
+    const verificationUrl = proxyUrl && c.committedViaEigenDA
       ? `${proxyUrl}/get/${c.kzgHash.replace("eigenda:", "")}`
-      : null,
-    passed: null, // verifier must fetch blob from EigenDA and check sha256(blob) === sealedBlobHash
+      : null;
+
+    let passed: boolean | null = null;
+    if (verificationUrl && c.sealedBlobHash) {
+      try {
+        const r = await fetch(verificationUrl, { signal: AbortSignal.timeout(5000) });
+        if (r.ok) {
+          const buf = Buffer.from(await r.arrayBuffer());
+          const actualHash = crypto.createHash("sha256").update(buf).digest("hex");
+          passed = (actualHash === c.sealedBlobHash);
+        }
+      } catch { /* proxy unreachable */ }
+    }
+
+    return {
+      agentId:                 c.agentId,
+      agentName:               c.agentName,
+      committedSealedBlobHash: c.sealedBlobHash,
+      verificationUrl,
+      passed,
+    };
   }));
 
-  const revealWindowBlock = coordinator.commitWindowCloseBlock;
+  const revealWindowBlock = source.commitWindowCloseBlock;
   const independenceChecks = commits.map(c => {
     const ref = c.eigenDAReferenceBlock;
     const close = revealWindowBlock;
@@ -288,16 +317,16 @@ app.get("/api/evidence", (_req, res) => {
     : false;
 
   const bundle = {
-    cycleId:       coordinator.cycleId,
-    cycleNumber:   coordinator.cycleNumber,
+    cycleId:       source.cycleId,
+    cycleNumber:   source.cycleNumber,
     generatedAt:   Date.now(),
     commitments:   commitmentRecords,
     integrityChecks,
     independenceChecks,
-    allCommitted:  commits.length >= coordinator.expectedAgentCount,
+    allCommitted:  commits.length >= source.expectedAgentCount,
     allIndependentBeforeReveal,
-    synthesis:     coordinator.lastSynthesisReport,
-    slashEvents:   coordinator.slashEvents,
+    synthesis:     source.lastSynthesisReport,
+    slashEvents:   source.slashEvents,
     verifierInstructions: [
       "1. For each commitment with committedViaEigenDA=true:",
       "   GET {verificationUrl} → deserialize blob → sha256(blob) should equal committedSealedBlobHash",

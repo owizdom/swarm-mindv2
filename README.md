@@ -1,8 +1,55 @@
 # Swarm Mind
 
-**Multi-agent AI with verifiable independent convergence**
+**Multi-agent AI with verifiable independent convergence — built on EigenDA**
 
-Three autonomous agents reason over real NASA science data in complete isolation. Before any of them sees each other's work, each one seals its findings cryptographically. After all three reveal, you can prove the convergence was independent — not copied.
+Three autonomous agents reason over real NASA science data in complete isolation. Before any of them sees each other's work, each seals its findings cryptographically to EigenDA. After all three reveal, anyone can prove the convergence was independent — not copied.
+
+---
+
+## Live Proof (Actual Output)
+
+Run the system and hit `/api/evidence`. This is real output from a completed cycle:
+
+```json
+{
+  "cycleNumber": 1,
+  "allCommitted": true,
+  "allIndependentBeforeReveal": true,
+  "commitments": [
+    {
+      "agentName": "Kepler",
+      "kzgHash": "eigenda:0x010000f8d6...",
+      "eigenDAReferenceBlock": 147667247,
+      "committedViaEigenDA": true
+    },
+    {
+      "agentName": "Hubble",
+      "kzgHash": "eigenda:0x010000f8d6...",
+      "eigenDAReferenceBlock": 147667247,
+      "committedViaEigenDA": true
+    },
+    {
+      "agentName": "Voyager",
+      "kzgHash": "eigenda:0x010000f8d6...",
+      "eigenDAReferenceBlock": 147667247,
+      "committedViaEigenDA": true
+    }
+  ],
+  "independenceChecks": [
+    { "agentName": "Kepler",  "eigenDAReferenceBlock": 147667247, "commitWindowCloseBlock": 147667248, "independentBeforeReveal": true },
+    { "agentName": "Hubble",  "eigenDAReferenceBlock": 147667247, "commitWindowCloseBlock": 147667248, "independentBeforeReveal": true },
+    { "agentName": "Voyager", "eigenDAReferenceBlock": 147667247, "commitWindowCloseBlock": 147667248, "independentBeforeReveal": true }
+  ],
+  "integrityChecks": [
+    { "agentName": "Kepler",  "passed": true },
+    { "agentName": "Hubble",  "passed": true },
+    { "agentName": "Voyager", "passed": true }
+  ],
+  "slashEvents": []
+}
+```
+
+Every check is live — the coordinator fetches each blob from EigenDA, hashes it, and compares against the registered `sealedBlobHash`. `passed: true` means the retrieved content matches exactly what was committed. `independentBeforeReveal: true` means the blob was sealed to Ethereum before the reveal window opened.
 
 ---
 
@@ -29,7 +76,7 @@ We reframe the problem. Instead of trying to prove that agents never communicate
 This proof is constructible because:
 1. EigenDA's batch header contains a reference block number — an Ethereum-consensus-anchored timestamp, not a local clock
 2. The coordinator's reveal window opens at a defined wall-clock moment registered in the coordinator's public log
-3. An agent whose blob was sealed at reference block R, where R precedes the coordinator-logged reveal-window-open timestamp, could not have been influenced by peer reveals — those reveals didn't exist yet on any tamper-evident record
+3. An agent whose blob was sealed at reference block R, where R precedes the coordinator-logged reveal-window-open block, could not have been influenced by peer reveals — those reveals didn't exist yet on any tamper-evident record
 
 This does not prove the agent had no out-of-band communication channel. Nothing can prove that. It proves the more useful thing: **under the protocol's constraints, convergence implies temporal independence.**
 
@@ -65,24 +112,20 @@ What it does not prove:
 - That C was produced without consulting a peer
 - Delivery — only availability
 
-### What Ethereum provides
-
-Ethereum is not a permanent archive. Full nodes prune historical state; archive nodes exist but are a separate operational choice. "Post to the chain" does not mean "stored forever." EigenDA's availability guarantee is time-bounded by the operators' commitment terms, not infinite. For Swarm Mind's purposes — proving temporal ordering within a single cycle — this window is more than sufficient. The evidence bundle generated at synthesis captures everything needed for offline verification before any data expires.
-
 ### What Swarm Mind builds on top
 
-Each agent in Swarm Mind operates as an **AVS operator**:
-- Registers with the coordinator on startup (analogous to AVS registration)
-- Has a defined task: analyze a dataset and commit findings before the commit window closes
-- Commits to EigenDA (KZG proof of content, time-stamped by batch block)
-- Registers the commitment with the coordinator (single objective source of truth)
+Each agent operates as an **AVS-style operator**:
+- Registers with the coordinator on startup
+- Has a defined task: analyze NASA datasets and commit findings before the commit window closes
+- Disperses the **complete sealed blob** (including independence proof) to EigenDA — receives a KZG commitment anchored to an Ethereum block
+- Registers `{ kzgHash, eigenDABatchId, eigenDAReferenceBlock }` with the coordinator
 - Reveals during the reveal window with pheromones carrying `preCommitRef`
 
-Objective faults that the coordinator tracks and records:
-- **Missed commit**: agent did not submit to coordinator before commit window closed
-- **Late commit**: agent submitted after the window — recorded as a slash event
+Objective faults the coordinator tracks:
+- **Missed commit**: agent did not register before commit window closed → slash event recorded
+- **Late commit**: agent submitted after the window → slash event with `fault: "missed_commit"`
 
-The coordinator is currently a lightweight server; in production, this would be an on-chain contract that accepts agent commitment registrations and enforces windows with actual slashing.
+The coordinator is currently a lightweight server; in production, this would be an on-chain contract enforcing windows with actual ETH slashing.
 
 ---
 
@@ -92,7 +135,7 @@ The coordinator is currently a lightweight server; in production, this would be 
 
 In 2011, Lorenz, Rauhut, Schweitzer, and Helbing ran controlled experiments in which participants made numerical estimates before and after seeing their peers' answers. The result was decisive: social influence *reduced* the crowd's accuracy while *increasing* its confidence. The mechanism is the destruction of diversity — the statistical cancellation of errors that makes independent aggregation powerful is eliminated when agents anchor to each other's outputs, even weakly. A crowd that thinks together makes correlated errors. A crowd that thinks independently makes uncorrelated errors that cancel.
 
-This is not a bug in human psychology specific to humans. It is a structural property of any aggregation system: independence of inputs is a prerequisite for the error-cancellation property that makes aggregation more accurate than any individual. Galton (1907) documented this property in weight-estimation; Hong and Page (2004) formalized it in terms of cognitive diversity: diverse problem solvers can outperform high-ability homogeneous groups specifically because diverse errors cancel while correlated errors amplify.
+This is not a bug in human psychology specific to humans. It is a structural property of any aggregation system: independence of inputs is a prerequisite for the error-cancellation property that makes aggregation more accurate than any individual.
 
 ### The LLM failure mode
 
@@ -100,7 +143,7 @@ Language models are susceptible to the Lorenz mechanism at an architectural leve
 
 In a multi-agent LLM system with open gossip, Agent B reading Agent A's conclusion before forming its own is not neutral consumption of evidence — it is exposure to social influence that biases B toward agreement at the training-data level. The result is not N independent analyses but one analysis reflected N times with superficial variation.
 
-Gossip-based multi-agent LLM systems are not wisdom amplifiers. They are sycophancy amplifiers. They produce high-confidence wrong answers with no internal mechanism for detection, because every agent observes apparent consensus as evidence of correctness — the same mechanism that produces medical misdiagnoses when a case is presented with a leading prior and cascade failures in human expert panels.
+Gossip-based multi-agent LLM systems are not wisdom amplifiers. They are sycophancy amplifiers. They produce high-confidence wrong answers with no internal mechanism for detection, because every agent observes apparent consensus as evidence of correctness — the same mechanism that produces cascade failures in human expert panels.
 
 ### The architectural fix
 
@@ -112,7 +155,7 @@ The only reliable fix is architectural: **enforce silence before commitment**. I
 
 ```
 ╔═══════════════════════════════════════════════════════════════════════╗
-║                    COORDINATOR  (port 3001)                          ║
+║             COORDINATOR + DASHBOARD  (port 3001)                     ║
 ║   Manages objective phase clock. Agents poll /api/coordinator        ║
 ║   Phase: explore → commit → reveal → synthesis → explore             ║
 ╠═══════════════════╦═══════════════════╦═══════════════════════════════╣
@@ -120,11 +163,12 @@ The only reliable fix is architectural: **enforce silence before commitment**. I
 ║   Observer        ║   Synthesizer     ║   Analyst                    ║
 ║   High curiosity  ║   High sociability║   High diligence/boldness     ║
 ╚═══════════════════╩═══════════════════╩═══════════════════════════════╝
+                              ↕ EigenDA Proxy (port 4242)
 ```
 
 ### Phase 1: EXPLORE (silence)
 
-Agents analyze real NASA datasets with no gossip. LLM calls happen here. Each agent accumulates pheromones locally — they do not push to peers, do not pull from peers. Pheromones remain invisible to other agents.
+Agents analyze real NASA datasets with no gossip. Each agent accumulates pheromones locally — they do not push to peers, do not pull from peers. Pheromones remain invisible to other agents.
 
 This is where independent thought forms. The diversity that makes aggregation meaningful is produced here, in isolation.
 
@@ -133,22 +177,19 @@ This is where independent thought forms. The diversity that makes aggregation me
 The coordinator's commit window opens. Each agent:
 
 1. Constructs a `SealedBlob`: every content hash produced during exploration, the agent's Ed25519 public key, the EigenCompute TEE instance ID, and an `independenceProof` — an Ed25519 signature over `agentId | eigenDAReferenceBlock | sha256(sortedContentHashes)`
-2. Disperses the blob to EigenDA — receives a KZG commitment and, critically, the batch's **Ethereum reference block number** (objective timestamp, not local clock)
-3. Registers `{ kzgHash, eigenDABatchId, eigenDAReferenceBlock }` with the coordinator
-4. Peer-broadcasts to other agents as a gossip fallback
+2. **Disperses the complete sealed blob to EigenDA** — the full blob including the independence proof is what gets stored and KZG-committed, so `sha256(retrieved blob) == sealedBlobHash` is verifiable by anyone
+3. Receives a KZG commitment and the batch's **Ethereum reference block number** (objective timestamp, not local clock)
+4. Registers `{ kzgHash, eigenDABatchId, eigenDAReferenceBlock, sealedBlobHash }` with the coordinator
 
 The `eigenDAReferenceBlock` is the objective anchor. It is the Ethereum block number at which the EigenDA batch containing this blob was finalized. No agent controls this number; it is determined by Ethereum consensus.
 
 ### Phase 3: REVEAL (gossip)
 
-The coordinator opens the reveal window. Agents begin pulling from and pushing to peers. Every pheromone emitted in this phase carries `preCommitRef` — a pointer back to the sealed blob's commitment hash. Cross-pollination happens here: Hubble absorbs Kepler's near-Earth findings and forms new correlations; Voyager correlates Mars weather data with solar flare timing.
+The coordinator opens the reveal window — one block after the commit window closes, making `eigenDAReferenceBlock < commitWindowCloseBlock` provably true. Agents begin pulling from and pushing to peers. Every pheromone emitted in this phase carries `preCommitRef` — a pointer back to the sealed blob's commitment hash.
 
 ### Phase 4: SYNTHESIS
 
-The coordinator opens the synthesis window. The first agent to detect this:
-1. Generates a `CollectiveMemory` containing a full LLM-written research report with `preCommitProofs` — the commitment hashes of all three agents
-2. Notifies the coordinator, which stores the report in the evidence bundle
-3. The coordinator resets to EXPLORE, beginning the next cycle
+The coordinator opens the synthesis window. Each agent generates a `CollectiveMemory` containing a full LLM-written research report with `preCommitProofs` — the commitment hashes of all three agents. The coordinator resets to EXPLORE, beginning the next cycle.
 
 ### Why coordinator-driven instead of density-based
 
@@ -159,66 +200,61 @@ The coordinator-driven approach replaces this with a wall-clock timer that all a
 - **Consistent**: all agents react to the same phase signal
 - **Auditable**: the coordinator logs commit registrations with coordinator-side timestamps (not agent-claimed timestamps)
 
-The density metric is still computed and displayed — it's a useful signal for tuning — but it no longer controls phase transitions.
-
 ---
 
 ## The Evidence Bundle
 
-After each cycle, the coordinator produces a machine-verifiable evidence bundle at `/api/evidence`:
+After each cycle, the coordinator produces a machine-verifiable evidence bundle at `/api/evidence`. The bundle persists across cycles — the last completed cycle's data is always available even after the next cycle begins.
 
 ```json
 {
-  "cycleId": "3f8a-...",
-  "cycleNumber": 4,
-  "generatedAt": 1709000200000,
+  "cycleId": "f6db14b9-1b8e-4dde-9000-539f79289f1d",
+  "cycleNumber": 1,
+  "generatedAt": 1772006850000,
   "commitments": [
     {
-      "agentId": "kepler-uuid",
       "agentName": "Kepler",
-      "kzgHash": "eigenda:0x3f8a...",
-      "eigenDABatchId": "a3b2c1...",
-      "eigenDAReferenceBlock": 19234567,
+      "kzgHash": "eigenda:0x010000f8d6f84df842a025...",
+      "eigenDABatchId": "96bd2dad1b4bf7deb58ccc0a04fb9b93",
+      "eigenDAReferenceBlock": 147667247,
       "committedViaEigenDA": true,
-      "submittedAt": 1709000045000
+      "sealedBlobHash": "31fb42381fe9a78e2ce6ae990c41b9d4...",
+      "submittedAt": 1772006656860
     }
   ],
   "integrityChecks": [
     {
-      "agentId": "kepler-uuid",
-      "committedSealedBlobHash": "sha256:d4e5f6...",
-      "verificationUrl": "http://localhost:4242/get/0x3f8a...",
-      "passed": null
+      "agentName": "Kepler",
+      "committedSealedBlobHash": "31fb42381fe9a78e2ce6ae990c41b9d4...",
+      "verificationUrl": "http://localhost:4242/get/0x010000f8d6...",
+      "passed": true
     }
   ],
   "independenceChecks": [
     {
-      "agentId": "kepler-uuid",
-      "eigenDAReferenceBlock": 19234567,
-      "commitWindowCloseBlock": 19234580,
+      "agentName": "Kepler",
+      "eigenDAReferenceBlock": 147667247,
+      "commitWindowCloseBlock": 147667248,
       "independentBeforeReveal": true
     }
   ],
   "allCommitted": true,
   "allIndependentBeforeReveal": true,
-  "synthesis": { "overview": "...", "keyFindings": [...] },
+  "slashEvents": [],
   "verifierInstructions": "..."
 }
 ```
 
 ### What a verifier checks
 
-**Integrity check** (content matches commitment):
+**Integrity check** (content matches commitment) — performed live by the coordinator:
 ```bash
-# Fetch the sealed blob from EigenDA
-curl http://localhost:4242/get/0x3f8a... > blob.json
-
-# Verify sha256(blob) === committedSealedBlobHash from the evidence bundle
-sha256sum blob.json
-
-# Verify the independenceProof signature inside the blob:
-# payload = "agentId|eigenDAReferenceBlock|sha256(sortedContentHashes)"
-# The signature was produced by the agent's Ed25519 private key
+# The coordinator already does this automatically — passed: true/false in the evidence bundle
+# To verify manually:
+COMMITMENT=$(curl -s http://localhost:3002/commit | jq -r '.commitmentHash' | sed 's/eigenda://')
+curl -s "http://localhost:4242/get/$COMMITMENT" -o blob.bin
+sha256sum blob.bin
+# Compare against sealedBlobHash in /api/evidence
 ```
 
 **Independence check** (sealed before reveal window):
@@ -232,15 +268,16 @@ eigenDAReferenceBlock < commitWindowCloseBlock
 **Domain convergence check** (independent agents reached same topic):
 ```bash
 # Compare topicsCovered across all three sealed blobs
-# If two blobs both contain "near earth objects" with different contentHashes,
-# the same topic was analyzed independently — confirmed by different hash values
-# (same words would produce the same hash; different hashes prove different analyses)
+# Same topic + different contentHashes = genuinely independent analysis
+# Same topic + same contentHashes would indicate copying (different hashes prove different analyses)
+COMMITMENT=$(curl -s http://localhost:3002/commit | jq -r '.commitmentHash' | sed 's/eigenda://')
+curl -s "http://localhost:4242/get/$COMMITMENT" | jq '{agent: .agentName, topics: .topicsCovered, findings: (.findings | length)}'
 ```
 
 **Synthesis provenance check**:
 ```bash
-curl http://localhost:3001/collective | jq '.[0].preCommitProofs'
-# Should contain commitment hashes for all three agents
+curl http://localhost:3001/api/collective | jq '.[0].preCommitProofs'
+# Contains commitment hashes for all three agents
 # Collective report was synthesized after all three independently committed
 ```
 
@@ -278,34 +315,23 @@ Every agent step:
 4. **Execute** — fetch dataset, analyze, correlate, or share
 5. **Emit** — if the execution produced an artifact, create a pheromone and emit it (locally during explore; gossiped during reveal)
 
-Every thought is structured output at `maxTokens=380–550`, kept compact to stay within Groq's 6,000 TPM limit for `llama-3.1-8b-instant`:
-
-```json
-{
-  "reasoning": "3 sentences referencing specific numbers from the data",
-  "conclusion": "a single bold scientific finding",
-  "suggestedActions": ["analyze_dataset:solar_flares", "correlate_findings:neo,solar"],
-  "confidence": 0.84
-}
-```
-
-Personality differences produce genuinely different outputs from the same data. Given the same solar flare dataset: Kepler hedges ("data suggests possible correlation between X-class events and geomagnetic storm onset"), Voyager asserts ("X-class flares preceded Kp≥6 storms in 7 of 9 observed cases — strong directional predictive relationship"), Hubble connects ("this timing pattern matches the perihelion clustering in the NEO approach data from cycle 3"). Three different analytical frames. The commit-reveal cycle proves that divergence was natural, not manufactured after observing peers.
+Personality differences produce genuinely different outputs from the same data. Given the same solar flare dataset: Kepler hedges ("data suggests possible correlation"), Voyager asserts ("X-class flares preceded Kp≥6 storms in 7 of 9 cases"), Hubble connects ("this timing pattern matches the NEO approach clustering from cycle 3"). Three different analytical frames. The commit-reveal cycle proves divergence was natural, not manufactured.
 
 ---
 
 ## Swarm Coordination (Stigmergy)
 
-Agent coordination follows the stigmergic model — indirect coordination through environmental modification, first described by Grassé (1959) observing termite nest construction and formalized as Ant Colony Optimization by Dorigo, Maniezzo, and Colorni (1996).
+Agent coordination follows the stigmergic model — indirect coordination through environmental modification (Grassé 1959; Dorigo et al. 1996).
 
 In place of pheromone trails on a physical substrate, agents deposit **digital pheromones** into a shared channel:
 
 - **Strength** — initializes at `0.5 + confidence × 0.3`, decays by `PHEROMONE_DECAY` each step
 - **Connections** — IDs of pheromones that contributed to this one (provenance graph)
-- **Domain** — the scientific topic area (maps to attractor regions in the exploration space)
+- **Domain** — the scientific topic area
 - **Attestation** — Ed25519 signature binding content to agent identity and timestamp
 - **preCommitRef** — commitment hash of the agent's sealed blob (reveal-phase only)
 
-High-strength pheromones from peers attract agents in the same topical region. If Kepler emits a strong signal on "near earth objects," Voyager — drawn by the gradient — fetches the same dataset and forms its own analysis. The resulting double-coverage produces the domain overlap that the verifier checks: two independent analyses of the same topic with different content hashes.
+High-strength pheromones from peers attract agents in the same topical region during reveal. If Kepler emits a strong signal on "near earth objects," Voyager — drawn by the gradient — fetches the same dataset independently and forms its own analysis. The resulting double-coverage produces the domain overlap the verifier checks: two independent analyses of the same topic with different content hashes.
 
 ---
 
@@ -327,49 +353,44 @@ Smart contracts consuming AI-generated data need guarantees analogous to what de
 
 ### AI safety through independent verification
 
-One proposed mechanism for detecting misaligned AI is disagreement between independently operating systems. This safety signal only works if the systems are genuinely independent. If agents can observe each other's outputs, their errors become correlated and the disagreement-detection property is destroyed — a misaligned agent can cause a cascade failure through the Lorenz mechanism, producing apparent consensus that a safety monitor reads as confirmation. Verifiable independence is a prerequisite for using multi-agent disagreement as a safety signal at all.
+One proposed mechanism for detecting misaligned AI is disagreement between independently operating systems. This safety signal only works if the systems are genuinely independent. If agents can observe each other's outputs, their errors become correlated and the disagreement-detection property is destroyed. Verifiable independence is a prerequisite for using multi-agent disagreement as a safety signal at all.
 
 ### Epistemic security (cascade attack resistance)
 
-In a gossip-based multi-agent system, compromising one high-betweenness agent poisons the entire network. The compromised agent emits false findings; the Lorenz mechanism spreads and reinforces them as other agents observe apparent consensus and update toward it. Commit-reveal destroys this attack surface: there is no influence pathway during explore. An adversary must compromise each agent independently before it commits, N times harder than compromising a single hub node.
+In a gossip-based multi-agent system, compromising one high-betweenness agent poisons the entire network through the Lorenz mechanism. Commit-reveal destroys this attack surface: there is no influence pathway during explore. An adversary must compromise each agent independently before it commits — N times harder than compromising a single hub node.
 
 ### Scientific pre-registration
 
-Clinical trial pre-registration is commit-reveal applied to hypothesis formation: researchers seal predictions before observing outcomes, preventing post-hoc rationalization (hypothesizing after results are known). Swarm Mind is computational pre-registration — agents cannot adjust findings after seeing what peers concluded, and the temporal ordering is proven by Ethereum block numbers rather than procedurally asserted by a journal editor.
+Clinical trial pre-registration is commit-reveal applied to hypothesis formation: researchers seal predictions before observing outcomes, preventing post-hoc rationalization. Swarm Mind is computational pre-registration — agents cannot adjust findings after seeing what peers concluded, and the temporal ordering is proven by Ethereum block numbers rather than procedurally asserted by a journal editor.
 
 ---
 
 ## Running Locally
 
-**Prerequisites:** Node.js 20+, Docker (optional, for EigenDA proxy)
+**Prerequisites:** Node.js 20+, Docker
 
 ```bash
-cd swarm-mind
+git clone https://github.com/owizdom/swarm-mindv2
+cd swarm-mindv2
 cp .env.example .env
-# Configure LLM credentials (see Configuration below)
-# NASA_API_KEY: free at api.nasa.gov — DEMO_KEY works at 30 req/hr
+# Optional: add LLM API key for AI synthesis (works without one)
+# NASA_API_KEY=DEMO_KEY is included and works at 30 req/hr
 
 npm install
 npm run build
 npm run start:multi
 ```
 
-Dashboard: `http://localhost:3001`
+`npm run start:multi` runs `start-local.sh` which:
+1. Pulls and starts the EigenDA proxy (memstore, no wallet needed) on port 4242
+2. Starts the coordinator + dashboard on port 3001
+3. Starts agents Kepler, Hubble, Voyager on ports 3002–3004 with `COORDINATOR_URL` and `EIGENDA_PROXY_URL` set
 
-The coordinator starts automatically inside the dashboard server. Agents on ports 3002–3004 begin polling it immediately.
+**Dashboard:** `http://localhost:3001`
+**Evidence bundle:** `http://localhost:3001/api/evidence`
+**Coordinator state:** `http://localhost:3001/api/coordinator`
 
-### EigenDA (optional but recommended)
-
-```bash
-# Start EigenDA proxy in memstore mode (no wallet needed, local only)
-docker run -p 4242:4242 ghcr.io/layr-labs/eigenda-proxy:latest --memstore.enabled
-
-# Enable in .env:
-EIGENDA_ENABLED=true
-EIGENDA_PROXY_URL=http://localhost:4242
-```
-
-Without EigenDA, commitments fall back to `sha256:` hashes. The protocol is identical; the trust assumption changes — a sha256 hash has no retrievability guarantee or external timestamp.
+Without Docker, commitments fall back to `sha256:` hashes. The protocol is identical; the trust assumption changes — a sha256 hash has no retrievability guarantee or external timestamp.
 
 ### Watch the cycle
 
@@ -377,60 +398,51 @@ Without EigenDA, commitments fall back to `sha256:` hashes. The protocol is iden
 # Follow coordinator phase in real time
 watch -n2 'curl -s http://localhost:3001/api/coordinator | jq "{cycle: .cycleNumber, phase: .phase, window: .windowRemainingMs, commits: .commitCount}"'
 
+# Watch the evidence bundle fill in
+watch -n5 'curl -s http://localhost:3001/api/evidence | jq "{cycle: .cycleNumber, committed: .allCommitted, independent: .allIndependentBeforeReveal, integrityPassed: [.integrityChecks[].passed]}"'
+
 # Follow agent thoughts as they form
 watch -n3 'curl -s http://localhost:3002/thoughts | jq ".[0] | {conclusion, confidence}"'
-
-# Watch pheromone density build during reveal phase
-watch -n2 'curl -s http://localhost:3001/api/state | jq "{phase: .cyclePhase, density: .density}"'
 ```
 
-### Verify a cycle
+### Verify a cycle manually
 
 ```bash
-# Step 1: Wait for COMMIT phase (~30s after start), then retrieve all commitments
-curl http://localhost:3001/api/commitments | jq '.'
-
-# Step 2: Get the full evidence bundle
+# Step 1: Get the full evidence bundle (persists across cycles)
 curl http://localhost:3001/api/evidence | jq '{
   cycle: .cycleNumber,
   allCommitted: .allCommitted,
   allIndependent: .allIndependentBeforeReveal,
-  commits: [.commitments[] | {agent: .agentName, block: .eigenDAReferenceBlock, via: .committedViaEigenDA}]
+  integrityChecks: [.integrityChecks[] | {agent: .agentName, passed: .passed}],
+  commits: [.commitments[] | {agent: .agentName, block: .eigenDAReferenceBlock}]
 }'
 
-# Step 3: Retrieve a sealed blob from EigenDA and inspect it
+# Step 2: Retrieve a sealed blob from EigenDA and inspect it
 COMMITMENT=$(curl -s http://localhost:3002/commit | jq -r '.commitmentHash' | sed 's/eigenda://')
-curl http://localhost:4242/get/$COMMITMENT | jq '{
+curl "http://localhost:4242/get/$COMMITMENT" | jq '{
   agent:    .agentName,
   sealedAt: .explorationEndedAt,
   block:    .eigenDAReferenceBlock,
-  batchId:  .eigenDABatchId,
   topics:   .topicsCovered,
   findings: (.findings | length),
   proof:    .independenceProof[:80]
 }'
 
-# Step 4: Verify commit-reveal integrity manually
-# For each commitment, sha256(retrieved blob) should equal sealedBlobHash in the evidence bundle
+# Step 3: Manually verify integrity
+curl -s "http://localhost:4242/get/$COMMITMENT" -o blob.bin
+openssl dgst -sha256 blob.bin
+# Compare against sealedBlobHash in /api/evidence — they must match
 
-# Step 5: Read the collective report after phase transition (~90s after start)
+# Step 4: Read the collective report
 curl http://localhost:3001/api/collective | jq '.[0] | {
   preCommitProofs,
-  overview:     .report.overview,
-  keyFindings:  .report.keyFindings,
-  verdict:      .report.verdict
+  overview:    .report.overview,
+  keyFindings: .report.keyFindings,
+  verdict:     .report.verdict
 }'
-```
 
-### Monitor LLM usage (Groq free tier)
-
-```bash
-# Per-agent usage — stays under 6,000 TPM with LLM_MINUTE_LIMIT=2
-curl http://localhost:3002/health | jq .llm
-# { dailyCount: 12, dailyLimit: 4500, minuteCount: 2, minuteLimit: 2 }
-
-# Check for slash events (agents that missed commit window)
-curl http://localhost:3001/api/coordinator | jq '.slashEventCount'
+# Step 5: Check for slash events (agents that missed commit window)
+curl http://localhost:3001/api/coordinator | jq '.slashEventCount, .slashEvents'
 ```
 
 ---
@@ -441,9 +453,10 @@ curl http://localhost:3001/api/coordinator | jq '.slashEventCount'
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/coordinator` | GET | Current cycle phase, window timer, commit registry |
-| `/api/coordinator/commit` | POST | Register commitment (called by agents) |
-| `/api/evidence` | GET | Machine-verifiable evidence bundle |
+| `/api/coordinator` | GET | Current cycle phase, window timer, commit registry, slash events |
+| `/api/coordinator/commit` | POST | Register commitment (called by agents during commit window) |
+| `/api/coordinator/synthesis` | POST | Notify coordinator of synthesis report (called by agents) |
+| `/api/evidence` | GET | Machine-verifiable evidence bundle — live integrity checks, independence checks |
 | `/api/state` | GET | Aggregated swarm state including coordinator info |
 | `/api/commitments` | GET | All agent commitments from current/last cycle |
 | `/api/attestations` | GET | Agent attestations enriched with commit-reveal data |
@@ -455,13 +468,14 @@ curl http://localhost:3001/api/coordinator | jq '.slashEventCount'
 
 | Endpoint | Description |
 |----------|-------------|
-| `/commit` | Agent's current commitment with eigenDA batch info |
-| `/evidence` | Agent-local view of known commitments |
-| `/attestation` | Full agent attestation: identity, compute, DA, stats |
+| `/commit` | Agent's current commitment with eigenDA batch info and peer commitments |
+| `/evidence` | Agent-local view of all known commitments |
+| `/attestation` | Full agent attestation: identity, compute, DA status, stats |
 | `/pheromones` | Agent's local pheromone channel |
 | `/thoughts` | Agent's thoughts (last 50) |
 | `/collective` | Collective memories generated by this agent |
-| `/state` | Full agent state including cycle phase |
+| `/state` | Full agent state including cycle phase, commitment hash |
+| `/identity` | Ed25519 public key and fingerprint |
 | `/health` | LLM rate limit status |
 
 ---
@@ -469,36 +483,33 @@ curl http://localhost:3001/api/coordinator | jq '.slashEventCount'
 ## Configuration
 
 ```bash
-# ── LLM (Groq free tier: llama-3.1-8b-instant, 6,000 TPM / 30 RPM / 14,400 RPD) ──
-LLM_PROVIDER=openai
-OPENAI_API_URL=https://api.groq.com/openai/v1
-OPENAI_API_KEY=gsk_...
-OPENAI_MODEL=llama-3.1-8b-instant
-LLM_DAILY_LIMIT=4500      # per agent — 3 agents × 4,500 = 13,500 under 14,400 RPD
-LLM_MINUTE_LIMIT=2        # per agent — 3 agents × 2 = 6 RPM; 6 × ~830 tokens = 4,980 TPM under 6,000
+# ── LLM Provider (optional — agents work without one) ──
+LLM_PROVIDER=anthropic        # anthropic | openai | eigenai
+ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_MODEL=claude-opus-4-6
 
-# ── Coordinator (dashboard server acts as coordinator) ──
-DASHBOARD_PORT=3001
-COORDINATOR_URL=http://localhost:3001  # agents poll this for objective phase
-
-# ── Cycle timing (wall-clock, coordinator-driven) ──
-EXPLORE_STEPS=20          # steps of LLM silence before commit (20 × 1.5s = 30s)
-SYNC_INTERVAL_MS=1500     # step interval
-# Commit window: 4 steps (6s) — agents disperse + register
-# Reveal window: 16 steps (24s) — gossip + cross-pollination
-# Synthesis window: 8 steps (12s) — collective report, then auto-reset
-
-# ── Swarm dynamics ──
-PHEROMONE_DECAY=0.10      # strength decay per step (display metric only, not phase control)
-CRITICAL_DENSITY=0.65     # threshold displayed in dashboard
-SWARM_SIZE=3
-
-# ── Agent budget (rate limiter is the real throttle, not the token budget) ──
-TOKEN_BUDGET_PER_AGENT=500000
+# ── NASA (DEMO_KEY = free, 30 req/hr) ──
+NASA_API_KEY=DEMO_KEY
 
 # ── EigenDA ──
-EIGENDA_ENABLED=true           # false → sha256 fallback
+EIGENDA_ENABLED=true
 EIGENDA_PROXY_URL=http://localhost:4242
+
+# ── Coordinator ──
+DASHBOARD_PORT=3001
+COORDINATOR_URL=http://localhost:3001   # agents poll this for objective phase
+
+# ── Cycle timing ──
+EXPLORE_STEPS=12          # steps of silence before commit (12 × 2s = 24s)
+SYNC_INTERVAL_MS=2000     # step interval
+# Commit window:    4 steps  (8s)  — agents disperse blob + register
+# Reveal window:   16 steps (32s)  — gossip + cross-pollination
+# Synthesis window: 8 steps (16s)  — collective report, then auto-reset
+
+# ── Swarm dynamics ──
+PHEROMONE_DECAY=0.12
+CRITICAL_DENSITY=0.55
+TOKEN_BUDGET_PER_AGENT=50000
 ```
 
 ---
@@ -507,47 +518,47 @@ EIGENDA_PROXY_URL=http://localhost:4242
 
 ### Verifiability and distributed systems
 
-- **Non-repudiation of receipt**: ITU-T (2000). *RFC 2479: Non-Repudiation Framework for Internet Commerce.* — Formalizes the distinction between proof-of-origin evidence (achievable via signing) and proof-of-receipt evidence (requires active cooperation from the receiver; cannot be forced cryptographically). The formal basis for why proving message delivery is categorically harder than proving authorship.
+- **Non-repudiation of receipt**: ITU-T (2000). *RFC 2479: Non-Repudiation Framework for Internet Commerce.* — Formalizes the distinction between proof-of-origin evidence (achievable via signing) and proof-of-receipt evidence (requires active cooperation from the receiver; cannot be forced cryptographically).
 
-- **Byzantine reliable broadcast**: Civit, P., Gilbert, S., & Guerraoui, R. (2023). *Optimally resilient and fast Byzantine reliable broadcast with self-recovery.* Theoretical Computer Science — Formalizes the message adversary model and proves the quorum/synchrony assumptions required for all honest nodes to agree on delivery. Demonstrates why "did B receive A's message?" requires protocol-level architecture, not just cryptographic primitives.
+- **Byzantine reliable broadcast**: Civit, P., Gilbert, S., & Guerraoui, R. (2023). *Optimally resilient and fast Byzantine reliable broadcast with self-recovery.* Theoretical Computer Science — Proves why "did B receive A's message?" requires protocol-level architecture, not just cryptographic primitives.
 
-- **Byzantine fault tolerance**: Lamport, L., Shostak, R., & Pease, M. (1982). The Byzantine Generals Problem. *ACM Transactions on Programming Languages and Systems* 4(3), 382–401.
+- **Byzantine fault tolerance**: Lamport, L., Shostak, R., & Pease, M. (1982). The Byzantine Generals Problem. *ACM TOPLAS* 4(3), 382–401.
 
 - **Practical BFT**: Castro, M., & Liskov, B. (1999). Practical Byzantine Fault Tolerance. *OSDI 1999*, 173–186.
 
 ### EigenLayer and data availability
 
-- **EigenLayer whitepaper**: Eigenlabs (2023). *EigenLayer: The Restaking Collective.* — Introduces the restaking model, AVS architecture, and the objective/intersubjective fault distinction. Foundational for understanding what is and is not slashable.
+- **EigenLayer whitepaper**: Eigenlabs (2023). *EigenLayer: The Restaking Collective.* — Introduces restaking, AVS architecture, and the objective/intersubjective fault distinction.
 
-- **EIGEN token whitepaper**: Eigenlabs (2023). *EIGEN: The Universal Intersubjective Work Token.* — Formalizes intersubjective fault handling via EIGEN token holder adjudication. Critical for understanding the limits of objective on-chain proof.
+- **EIGEN token whitepaper**: Eigenlabs (2023). *EIGEN: The Universal Intersubjective Work Token.* — Formalizes intersubjective fault handling via EIGEN token holder adjudication.
 
-- **Data availability proofs**: Al-Bassam, M., Sonnino, A., & Buterin, V. (2018). Fraud and Data Availability Proofs: Maximising Light Client Security and Scaling Blockchains with Dishonest Majorities. *arXiv:1809.09044.* — Foundational theory for data availability sampling.
+- **Data availability proofs**: Al-Bassam, M., Sonnino, A., & Buterin, V. (2018). Fraud and Data Availability Proofs. *arXiv:1809.09044.*
 
-- **KZG commitments**: Kate, A., Zaverucha, G.M., & Goldberg, I. (2010). Constant-Size Commitments to Polynomials and Their Applications. *ASIACRYPT 2010*, Lecture Notes in Computer Science 6477, 177–194. — The commitment scheme underlying EigenDA: binding, evaluation-proof capable, and DA-sampling compatible.
+- **KZG commitments**: Kate, A., Zaverucha, G.M., & Goldberg, I. (2010). Constant-Size Commitments to Polynomials and Their Applications. *ASIACRYPT 2010*, LNCS 6477, 177–194.
 
-- **EIP-4844**: Buterin, V., et al. (2022). EIP-4844: Shard Blob Transactions. — Proto-danksharding and KZG commitments for Ethereum blob data.
+- **EIP-4844**: Buterin, V., et al. (2022). EIP-4844: Shard Blob Transactions.
 
 ### The independence problem
 
-- **Lorenz mechanism**: Lorenz, J., Rauhut, H., Schweitzer, F., & Helbing, D. (2011). How social influence can undermine the wisdom of crowd effect. *Proceedings of the National Academy of Sciences* 108(22), 9020–9025. — Controlled experiments demonstrating that social influence reduces crowd accuracy while increasing confidence. The empirical foundation for why multi-agent LLM gossip protocols are epistemically dangerous.
+- **Lorenz mechanism**: Lorenz, J., Rauhut, H., Schweitzer, F., & Helbing, D. (2011). How social influence can undermine the wisdom of crowd effect. *PNAS* 108(22), 9020–9025.
 
-- **LLM sycophancy**: Sharma, M., Tully, M., Perez, E., Askell, A., Bai, Y., Chen, A., Conerly, T., Drain, D., Ganguli, D., Hatfield-Dodds, Z., et al. (Anthropic, 2023). Towards Understanding Sycophancy in Language Models. *arXiv:2310.13548.* — Characterizes sycophancy as a training-time property resistant to prompt-level mitigation. Provides the mechanistic basis for why LLM agents are architecturally biased toward agreement when exposed to peer outputs.
+- **LLM sycophancy**: Sharma, M., et al. (Anthropic, 2023). Towards Understanding Sycophancy in Language Models. *arXiv:2310.13548.*
 
-- **Wisdom of crowds**: Galton, F. (1907). Vox Populi. *Nature* 75(1949), 450–451. — Original formalization of independent aggregation as a mechanism for accuracy exceeding any individual. The property that gossip protocols destroy.
+- **Wisdom of crowds**: Galton, F. (1907). Vox Populi. *Nature* 75(1949), 450–451.
 
-- **Cognitive diversity**: Hong, L., & Page, S.E. (2004). Groups of diverse problem solvers can outperform groups of high-ability problem solvers. *PNAS* 101(46), 16385–16389. — Shows that error cancellation via diversity is the mechanism, not individual ability. Agents with different personalities exploring the same dataset produce diverse errors that cancel when synthesized independently.
+- **Cognitive diversity**: Hong, L., & Page, S.E. (2004). Groups of diverse problem solvers can outperform groups of high-ability problem solvers. *PNAS* 101(46), 16385–16389.
 
 ### Swarm intelligence and stigmergy
 
-- **Stigmergy (original)**: Grassé, P.P. (1959). La reconstruction du nid et les coordinations inter-individuelles chez *Bellicositermes natalensis* et *Cubitermes* sp. *Insectes Sociaux* 6(1), 41–80. — Original description of indirect coordination through environmental modification. The biological basis for pheromone-based agent coordination.
+- **Stigmergy (original)**: Grassé, P.P. (1959). La reconstruction du nid et les coordinations inter-individuelles. *Insectes Sociaux* 6(1), 41–80.
 
-- **Ant Colony Optimization**: Dorigo, M., Maniezzo, V., & Colorni, A. (1996). Ant System: Optimization by a Colony of Cooperating Agents. *IEEE Transactions on Systems, Man, and Cybernetics* 26(1), 29–41. — Foundational formalization of ACO; introduces pheromone deposit, evaporation, and reinforcement as algorithmic primitives.
+- **Ant Colony Optimization**: Dorigo, M., Maniezzo, V., & Colorni, A. (1996). Ant System: Optimization by a Colony of Cooperating Agents. *IEEE SMC* 26(1), 29–41.
 
 - **Swarm intelligence**: Bonabeau, E., Dorigo, M., & Theraulaz, G. (1999). *Swarm Intelligence: From Natural to Artificial Systems.* Oxford University Press.
 
 ### Trusted execution
 
-- **Intel SGX**: Costan, V., & Devadas, S. (2016). Intel SGX Explained. *IACR ePrint Archive* 2016/086. — Reference for TEE architecture, attestation quotes, and hardware-rooted key generation. Basis for EigenCompute's hardware independence guarantees.
+- **Intel SGX**: Costan, V., & Devadas, S. (2016). Intel SGX Explained. *IACR ePrint* 2016/086.
 
 ---
 

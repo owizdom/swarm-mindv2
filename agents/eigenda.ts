@@ -68,19 +68,23 @@ export async function disperseBlob(payload: unknown): Promise<DAResult> {
   }
 
   const now = Date.now();
-  const rawText = (await res.text()).trim();
 
-  // Newer proxy versions may return JSON with batch metadata; older ones return plain hex
+  // EigenDA proxy returns raw binary cert bytes — convert to 0x-prefixed hex for URL-safe storage
   let commitment: string;
   let batchId: string | null = null;
   let referenceBlockNumber: number | null = null;
-  try {
-    const json = JSON.parse(rawText) as Record<string, unknown>;
-    commitment = (json.commitment ?? json.cert ?? rawText) as string;
+
+  const contentType = res.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) {
+    const json = await res.json() as Record<string, unknown>;
+    commitment = (json.commitment ?? json.cert) as string;
+    if (!commitment) throw new Error("EigenDA response missing commitment field");
     batchId = (json.batchId ?? json.batch_id ?? null) as string | null;
     referenceBlockNumber = (json.referenceBlockNumber ?? json.reference_block_number ?? null) as number | null;
-  } catch {
-    commitment = rawText;
+  } else {
+    // Binary cert response — encode as 0x-prefixed hex
+    const buf = Buffer.from(await res.arrayBuffer());
+    commitment = "0x" + buf.toString("hex");
   }
 
   // For memstore / local: derive simulated batch info from commitment + current time.

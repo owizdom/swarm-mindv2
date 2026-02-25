@@ -257,7 +257,6 @@ async function performCommit(): Promise<void> {
   const contentHashes = findings.map(f => f.contentHash).sort();
   const hashesDigest = crypto.createHash("sha256").update(contentHashes.join("|")).digest("hex");
 
-  // Disperse to EigenDA first so we have the objective reference block for the proof
   let commitmentHash: string;
   let committedViaEigenDA = false;
   let eigenDABatchId: string | null = null;
@@ -265,34 +264,50 @@ async function performCommit(): Promise<void> {
 
   if (eigenDAEnabled()) {
     try {
-      // Create a preliminary blob to disperse (without independenceProof — we'll add it after)
-      const prelimBlob = {
-        agentId: agent.state.id, agentName: agent.state.name,
-        explorationEndedAt: now, findings, topicsCovered: [...new Set(findings.map(f => f.domain))],
+      // Step 1: Disperse a tiny probe blob to get the objective Ethereum reference block
+      const probe = await disperseBlob({ agentId: agent.state.id, probe: true, ts: now });
+      eigenDAReferenceBlock = probe.referenceBlockNumber;
+      eigenDABatchId        = probe.batchId;
+
+      // Step 2: Build independence proof using the reference block as objective timestamp
+      const sigPayload = `${agent.state.id}|${eigenDAReferenceBlock}|${hashesDigest}`;
+      const independenceProof = buildAttestation(
+        sigPayload, agent.state.id, now,
+        agent.getPrivateKey(), agent.state.identity.publicKey
+      );
+
+      // Step 3: Disperse the FULL sealed blob (with proof) so sha256(fetched blob) is verifiable
+      const sealedBlobForDA: SealedBlob = {
+        agentId:              agent.state.id,
+        agentPublicKey:       agent.state.identity.publicKey,
+        agentName:            agent.state.name,
+        explorationEndedAt:   now,
+        eigenDAReferenceBlock,
+        eigenDABatchId,
+        teeInstanceId:        process.env.EIGENCOMPUTE_INSTANCE_ID || "local",
+        findings,
+        topicsCovered:        [...new Set(findings.map(f => f.domain))],
+        independenceProof,
       };
-      const result = await disperseBlob(prelimBlob);
-      commitmentHash        = `eigenda:${result.commitment}`;
-      committedViaEigenDA   = true;
-      eigenDABatchId        = result.batchId;
-      eigenDAReferenceBlock = result.referenceBlockNumber;
-      console.log(`  [${agent.state.name}] COMMIT → EigenDA batch ${eigenDABatchId?.slice(0, 12)}… block ${eigenDAReferenceBlock} (${findings.length} findings)`);
+      const result = await disperseBlob(sealedBlobForDA);
+      commitmentHash      = `eigenda:${result.commitment}`;
+      committedViaEigenDA = true;
+      // Keep probe's batchId/block so sealedBlob below matches what's stored in EigenDA exactly
+      console.log(`  [${agent.state.name}] COMMIT → EigenDA block ${eigenDAReferenceBlock} (${findings.length} findings, integrity-verifiable)`);
     } catch (err) {
-      const sealedBlobHashTemp = crypto.createHash("sha256").update(JSON.stringify({ agentId: agent.state.id, findings })).digest("hex");
-      commitmentHash = `sha256:${sealedBlobHashTemp}`;
-      // Derive simulated block for sha256 fallback
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`  [${agent.state.name}] EigenDA commit failed (${msg.slice(0,60)}), using SHA-256 fallback`);
       eigenDAReferenceBlock = Math.floor(now / 12_000);
-      eigenDABatchId = crypto.createHash("sha256").update(commitmentHash + Math.floor(now / 60_000)).digest("hex").slice(0, 32);
-      console.warn(`  [${agent.state.name}] EigenDA commit fallback: ${sealedBlobHashTemp.slice(0, 24)}…`);
+      eigenDABatchId = crypto.createHash("sha256").update(`${agent.state.id}${Math.floor(now / 60_000)}`).digest("hex").slice(0, 32);
+      commitmentHash = ""; // set below after sealedBlob is built
     }
   } else {
-    const sealedBlobHashTemp = crypto.createHash("sha256").update(JSON.stringify({ agentId: agent.state.id, findings })).digest("hex");
-    commitmentHash = `sha256:${sealedBlobHashTemp}`;
     eigenDAReferenceBlock = Math.floor(now / 12_000);
-    eigenDABatchId = crypto.createHash("sha256").update(commitmentHash + Math.floor(now / 60_000)).digest("hex").slice(0, 32);
-    console.log(`  [${agent.state.name}] COMMIT → SHA-256 block~${eigenDAReferenceBlock}: ${sealedBlobHashTemp.slice(0, 24)}…`);
+    eigenDABatchId = crypto.createHash("sha256").update(`${agent.state.id}${Math.floor(now / 60_000)}`).digest("hex").slice(0, 32);
+    commitmentHash = ""; // set below after sealedBlob is built
   }
 
-  // Independence proof payload now includes the objective eigenDA reference block
+  // Independence proof (used in both EigenDA and SHA-256 paths)
   const sigPayload = `${agent.state.id}|${eigenDAReferenceBlock ?? now}|${hashesDigest}`;
   const independenceProof = buildAttestation(
     sigPayload, agent.state.id, now,
@@ -312,6 +327,12 @@ async function performCommit(): Promise<void> {
     independenceProof,
   };
   const sealedBlobHash = crypto.createHash("sha256").update(JSON.stringify(sealedBlob)).digest("hex");
+
+  // SHA-256 fallback: commitment = sha256 of the blob (no external DA)
+  if (!committedViaEigenDA) {
+    commitmentHash = `sha256:${sealedBlobHash}`;
+    console.log(`  [${agent.state.name}] COMMIT → SHA-256 block~${eigenDAReferenceBlock}: ${sealedBlobHash.slice(0, 24)}…`);
+  }
 
   agent.state.commitmentHash  = commitmentHash;
   agent.state.commitTimestamp = now;
