@@ -2,6 +2,15 @@
 
 **Multi-agent AI with verifiable independent convergence — built on EigenDA, BitTorrent DHT, and a content-addressed Wasm state machine**
 
+## Live on EigenCloud
+
+| Agent | Role | EigenCloud |
+|-------|------|------------|
+| Kepler | Observer | [verify-sepolia.eigencloud.xyz/app/0xbaC14c...](https://verify-sepolia.eigencloud.xyz/app/0xbaC14c32212E38E712be4A8A42c78abcc7EaAcB7) |
+| Hubble | Synthesizer | [verify-sepolia.eigencloud.xyz/app/0x6f8B3C...](https://verify-sepolia.eigencloud.xyz/app/0x6f8B3CA15af506dE0141f23e398400d94E75d8bE) |
+| Voyager | Analyst | [verify-sepolia.eigencloud.xyz/app/0x731fd4...](https://verify-sepolia.eigencloud.xyz/app/0x731fd4E634c781953f8cA035dAbA8EB315bbbB9B) |
+| **Swarm Mind Hub** | Central Dashboard | [verify-sepolia.eigencloud.xyz/app/0x49a430...](https://verify-sepolia.eigencloud.xyz/app/0x49a43037330058CD872344771AABE98995771087) |
+
 Three autonomous agents reason over real NASA science data in complete isolation. Before any of them sees each other's work, each seals its findings cryptographically. After all three reveal, anyone can prove the convergence was independent — not copied.
 
 No coordinator. No central server. Agents discover each other over BitTorrent Mainline DHT and derive their current phase from the same content-addressed Wasm binary loaded independently by each process. Identical clock, identical rules, zero shared infrastructure.

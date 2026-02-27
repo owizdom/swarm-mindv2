@@ -60,12 +60,7 @@ PEER_URLS=${KEPLER_URL},${HUBBLE_URL},${VOYAGER_URL}
 EOF
 
 echo "==> Upgrading hub app: $HUB_APP_ID"
-ecloud compute app upgrade \
-  --app-id      "$HUB_APP_ID" \
-  --image-ref   "$IMAGE" \
-  --env-file    "$TMP_ENV" \
-  --private-key "$ECLOUD_PRIVATE_KEY" \
-  --rpc-url     "$ECLOUD_RPC_URL"
+ecloud compute app upgrade "$HUB_APP_ID" --image-ref "$IMAGE" --env-file "$TMP_ENV" --private-key "$ECLOUD_PRIVATE_KEY" --rpc-url "$ECLOUD_RPC_URL"
 
 rm -f "$TMP_ENV"
 
