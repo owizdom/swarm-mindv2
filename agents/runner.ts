@@ -31,6 +31,7 @@ import { isEnabled as eigenDAEnabled, disperseBlob } from "./eigenda";
 import { verifyAttestation, buildAttestation } from "./keystore";
 import { initDHT, getDiscoveredPeers, getDHTStatus, stopDHT } from "./dht";
 import { initPhaseMachine, computePhase, getModuleHash } from "./clock-phase";
+import { getTEEAttestation, getCachedAttestation } from "./tee-attestation";
 import type { Pheromone, PheromoneChannel, LLMConfig, CollectiveMemory, SealedBlob, AgentCommitment, CyclePhase, FindingSummary } from "./types";
 import { v4 as uuid } from "uuid";
 import { hash } from "./types";
@@ -594,7 +595,10 @@ app.get("/identity", (_, res) => {
 
 app.get("/attestation", (_, res) => {
   // Returns verifiable proof of this agent's identity and latest output
-  const latest = agent.state.knowledge.slice(-1)[0];
+  const latest  = agent.state.knowledge.slice(-1)[0];
+  const tee     = getCachedAttestation();
+  const dhtInfo = getDHTStatus();
+  const clock   = computePhase(Date.now(), EXPLORE_MS, COMMIT_MS, REVEAL_MS, SYNTHESIS_MS);
   const proof: Record<string, unknown> = {
     agent: {
       id:          agent.state.id,
@@ -603,14 +607,23 @@ app.get("/attestation", (_, res) => {
       fingerprint: agent.state.identity.fingerprint,
     },
     compute: {
-      eigenCompute: process.env.EIGENCOMPUTE_INSTANCE_ID || "local",
-      teeMode:      !!process.env.EIGENCOMPUTE_INSTANCE_ID,
-      instanceType: process.env.EIGENCOMPUTE_INSTANCE_TYPE || "local",
+      eigenCompute:  process.env.EIGENCLOUD_INSTANCE_ID || "local",
+      teeMode:       !!(process.env.EIGENCLOUD_INSTANCE_ID),
+      instanceType:  process.env.ECLOUD_INSTANCE_TYPE || "local",
+      teeAttestation: tee ? {
+        teeType:     tee.teeType,
+        quoteSha256: tee.quoteSha256,
+        fetchedAt:   tee.fetchedAt,
+      } : null,
     },
     dataAvailability: {
       eigenDAEnabled: eigenDAEnabled(),
       proxyUrl:       process.env.EIGENDA_PROXY_URL || null,
     },
+    wasmPhaseModule: getModuleHash().slice(0, 16) + "…",
+    wasmCycle:       clock.cycleNumber,
+    cyclePhase,
+    dhtPeers:        dhtInfo.networkPeers,
     latestPheromone: latest ? {
       id:          latest.id,
       domain:      latest.domain,
@@ -868,8 +881,11 @@ async function shutdown(): Promise<void> {
 process.on("SIGINT",  () => void shutdown());
 process.on("SIGTERM", () => void shutdown());
 
-// Await the Wasm phase machine before starting the main loop —
-// computePhase() throws if called before initPhaseMachine() resolves.
-initPhaseMachine().then(() => {
+// Await the Wasm phase machine and TEE attestation before starting the main loop.
+// getTEEAttestation() is non-blocking on failure — it logs a warning and continues.
+Promise.all([
+  initPhaseMachine(),
+  getTEEAttestation(),
+]).then(() => {
   run().catch(err => { console.error("Fatal:", err); process.exit(1); });
-}).catch(err => { console.error("[WasmPhase] Fatal:", err.message); process.exit(1); });
+}).catch(err => { console.error("[Startup] Fatal:", err.message); process.exit(1); });

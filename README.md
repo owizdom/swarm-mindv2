@@ -114,13 +114,43 @@ What it does not prove:
 - That C was produced without consulting a peer
 - Delivery — only availability
 
+### EigenCloud — hardware-isolated TEE execution (core)
+
+EigenCloud runs each agent inside an **Intel TDX confidential VM** — a hardware-enforced trusted execution environment where:
+
+- The enclave memory is encrypted by the CPU and inaccessible to any other process, the host OS, or the hypervisor
+- On startup, the CPU generates a **TDX attestation quote** — a hardware-signed certificate binding the exact container image hash to the enclave instance
+- The quote is available at a local HTTP endpoint inside the container and is fetched by `tee-attestation.ts` at startup
+
+**Why this matters for Swarm Mind:**
+
+The independence proof gets a hardware guarantee. Without EigenCloud, independence is *protocol-level* — agents commit before reveal, Wasm clock is shared, but a skeptic could argue "they're processes on the same machine." With EigenCloud:
+
+| Layer | What it proves |
+|-------|---------------|
+| Protocol (Wasm clock) | Agents computed phase identically from same binary |
+| Ed25519 commitment | Each agent sealed its findings before the reveal window |
+| EigenDA KZG | The sealed blob is retrievable and content-pinned |
+| **TDX enclave quote** | **Each agent ran in hardware-isolated memory — physically impossible to share state** |
+
+The TDX quote is returned in every agent's `/attestation` response under `compute.teeAttestation`. Anyone can verify the quote against Intel's certificate chain to confirm the agent ran genuine EigenCloud TEE hardware.
+
+**Deployment model — one enclave per agent:**
+
+Three separate EigenCloud instances, one per agent. Each gets its own:
+- Intel TDX enclave with isolated memory
+- TDX attestation quote (different per instance — proves distinct hardware execution)
+- Ed25519 keypair generated inside the enclave (hardware-rooted identity)
+
+The three quotes together form a hardware-level independence certificate for the swarm.
+
 ### What Swarm Mind builds on top
 
 Each agent operates as an **AVS-style operator**:
-- Registers with the coordinator on startup
-- Has a defined task: analyze NASA datasets and commit findings before the commit window closes
-- Disperses the **complete sealed blob** (including independence proof) to EigenDA — receives a KZG commitment anchored to an Ethereum block
-- Registers `{ kzgHash, eigenDABatchId, eigenDAReferenceBlock }` with the coordinator
+- Runs inside an EigenCloud TDX enclave — hardware-isolated memory
+- Generates an Ed25519 keypair inside the enclave — hardware-rooted identity
+- Fetches a TDX attestation quote at startup — hardware proof of what code is running
+- Disperses the **complete sealed blob** (including independence proof) to EigenDA — receives a KZG commitment
 - Reveals during the reveal window with pheromones carrying `preCommitRef`
 
 ---
@@ -150,26 +180,32 @@ The only reliable fix is architectural: **enforce silence before commitment**. I
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                    phase-machine.wasm  (sha256: 595f95e8…)          │
-│   content-addressed — each agent loads the same binary independently │
-│   computePhase(Date.now()) → explore | commit | reveal | synthesis   │
-│   same binary + same wall-clock = same phase, zero coordination      │
-└───────────────────────┬─────────────────────────────────────────────┘
-                        │ loaded by each agent at startup
-         ┌──────────────┼──────────────┐
-         ▼              ▼              ▼
-┌────────────────┐ ┌────────────────┐ ┌────────────────┐
-│ KEPLER  :3002  │ │ HUBBLE  :3003  │ │ VOYAGER :3004  │
-│ Observer       │ │ Synthesizer    │ │ Analyst        │
-│ DHT :4002      │ │ DHT :4003      │ │ DHT :4004      │
-└───────┬────────┘ └───────┬────────┘ └───────┬────────┘
-        └──────────────────┴──────────────────┘
-             BitTorrent Mainline DHT (BEP 5)
-             peer discovery — no registry
-                        ↕
-               EigenDA Proxy :4242
-      (SHA-256 fallback when Docker unavailable)
+┌──────────────────────────────────────────────────────────────────────┐
+│                     phase-machine.wasm  (sha256: 595f95e8…)          │
+│   content-addressed — each agent loads the same binary independently  │
+│   computePhase(Date.now()) → explore | commit | reveal | synthesis    │
+│   same binary + same wall-clock = same phase, zero coordination       │
+└────────────────────────┬─────────────────────────────────────────────┘
+                         │ loaded by each agent at startup
+          ┌──────────────┼──────────────┐
+          ▼              ▼              ▼
+┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
+│  EigenCloud     │ │  EigenCloud     │ │  EigenCloud     │
+│  TDX Enclave    │ │  TDX Enclave    │ │  TDX Enclave    │
+│  ┌───────────┐  │ │  ┌───────────┐  │ │  ┌───────────┐  │
+│  │ KEPLER    │  │ │  │ HUBBLE    │  │ │  │ VOYAGER   │  │
+│  │ Observer  │  │ │  │Synthesizer│  │ │  │ Analyst   │  │
+│  │ :3002     │  │ │  │ :3002     │  │ │  │ :3002     │  │
+│  │ DHT :4002 │  │ │  │ DHT :4002 │  │ │  │ DHT :4002 │  │
+│  └───────────┘  │ │  └───────────┘  │ │  └───────────┘  │
+│  TDX quote ✓    │ │  TDX quote ✓    │ │  TDX quote ✓    │
+└────────┬────────┘ └────────┬────────┘ └────────┬────────┘
+         └───────────────────┴───────────────────┘
+              BitTorrent Mainline DHT (BEP 5)
+              peer discovery — no registry, no coordinator
+                         ↕
+                EigenDA Proxy :4242
+       (SHA-256 fallback when Docker unavailable)
 ```
 
 ### Phase 1: EXPLORE (silence)
@@ -401,6 +437,37 @@ Kepler bootstraps the local DHT mesh on port 4002. Hubble and Voyager join via `
 **Agent attestation:** `http://localhost:3002/attestation` (and :3003, :3004)
 
 Without Docker, commitments fall back to `sha256:` hashes. The protocol is identical; the trust assumption changes — a sha256 hash has no retrievability guarantee or external timestamp.
+
+### Deploy to EigenCloud (production — 3 separate TDX enclaves)
+
+```bash
+# 1. Install the ecloud CLI
+#    → https://docs.eigencloud.xyz
+
+# 2. Build and push the single-agent image
+export IMAGE=docker.io/<you>/swarm-mind-agent:latest
+docker build --platform linux/amd64 -f Dockerfile.agent -t $IMAGE .
+docker push $IMAGE
+
+# 3. Deploy Kepler first (it seeds the DHT mesh)
+export ECLOUD_PRIVATE_KEY=0x...
+bash scripts/deploy-eigen-agents.sh .env
+
+# 4. Get Kepler's public URL from EigenCloud dashboard, then deploy Hubble + Voyager
+export KEPLER_PEER_URL=https://<kepler-instance>.eigencloud.app
+SKIP_KEPLER=1 bash scripts/deploy-eigen-agents.sh .env
+
+# 5. Verify TEE attestation on each agent
+curl https://<kepler-url>/attestation | jq '.compute.teeAttestation'
+# → { teeType: "tdx", quoteSha256: "...", fetchedAt: ... }
+# All three agents show different quoteSha256 — each has its own TDX enclave
+```
+
+Or use the all-in-one image (3 agents in one container — simpler, weaker isolation):
+```bash
+export IMAGE=docker.io/<you>/swarm-mind:latest
+APP_NAME=swarm-mind bash scripts/deploy-eigen-all.sh .env
+```
 
 ### Verify the Wasm binary
 

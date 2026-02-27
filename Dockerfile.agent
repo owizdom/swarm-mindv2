@@ -1,0 +1,46 @@
+# ── Swarm Mind — Single Agent Image ──────────────────────────────────
+# Deploy one container per agent on EigenCloud for hardware-isolated TEEs.
+# Each instance gets its own TDX enclave, its own Ed25519 keypair, and
+# its own TEE attestation quote — proving agents ran in fully isolated memory.
+#
+# Usage (set per-instance env vars at deploy time):
+#   AGENT_INDEX=0   AGENT_PORT=3002  DHT_PORT=4002  (Kepler)
+#   AGENT_INDEX=1   AGENT_PORT=3002  DHT_PORT=4002  (Hubble)
+#   AGENT_INDEX=2   AGENT_PORT=3002  DHT_PORT=4002  (Voyager)
+
+# ── Build stage ───────────────────────────────────────────────────────
+FROM node:22-slim AS builder
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
+
+COPY package.json package-lock.json* ./
+RUN npm install
+
+COPY tsconfig.json ./
+COPY agents/ ./agents/
+COPY dashboard/ ./dashboard/
+RUN npm run build
+
+# ── Runtime stage ─────────────────────────────────────────────────────
+FROM node:22-slim AS runtime
+WORKDIR /app
+
+COPY --from=builder /app/dist         ./dist
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./package.json
+
+# Persistent data volume — SQLite DB lives here
+VOLUME ["/data"]
+
+# Agent HTTP port (override with AGENT_PORT env var at deploy time)
+EXPOSE 3002
+
+# Healthcheck — EigenCloud uses this to confirm the agent is live
+HEALTHCHECK --interval=15s --timeout=5s --start-period=10s \
+  CMD node -e "fetch('http://localhost:'+(process.env.AGENT_PORT||3002)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+ENV NODE_ENV=production
+ENV DB_PATH=/data/swarm-agent.db
+
+CMD ["node", "dist/agents/runner.js"]
