@@ -34,12 +34,15 @@ start_agent() {
   local dht_port="$3"
   local bootstrap="${4:-}"
 
+  local env_bootstrap=""
+  [[ -n "$bootstrap" ]] && env_bootstrap="DHT_BOOTSTRAP=$bootstrap"
+
   AGENT_INDEX="$index" \
   AGENT_PORT="$port" \
   DHT_PORT="$dht_port" \
   NETWORK_ID="$NETWORK_ID" \
   DB_PATH="$DB_DIR/swarm-agent-${index}.db" \
-  ${bootstrap:+DHT_BOOTSTRAP="$bootstrap"} \
+  env ${env_bootstrap:+"DHT_BOOTSTRAP=$bootstrap"} \
   node dist/agents/runner.js &
   pids+=("$!")
 }
